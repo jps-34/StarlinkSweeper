@@ -33,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -510,7 +510,9 @@ def main():
     ap.add_argument("-o", "--csv", default="starlinksweeper_report.csv", help="CSV report path")
     ap.add_argument("--preview", metavar="DIR", help="PNG of each flagged frame with the lines drawn")
     ap.add_argument("--preview-all", action="store_true", help="PNG for every frame, not only flagged")
-    ap.add_argument("--move", metavar="DIR", help="move flagged frames into DIR (never deletes)")
+    ap.add_argument("--move", metavar="DIR",
+                    help="move flagged frames into DIR (never deletes); put it NEXT TO the scanned folder, "
+                         "e.g. <folder>_trails, so that your stacking program never imports them")
     ap.add_argument("--list", metavar="FILE", help="write flagged file names, one per line")
     ap.add_argument("--all-types", action="store_true",
                     help="scan every frame; by default flats, darks and bias (IMAGETYP header) are skipped")
@@ -534,6 +536,9 @@ def main():
                 files += [os.path.join(root, n) for n in sorted(names) if n.lower().endswith(EXTS)]
         elif p.lower().endswith(EXTS):
             files.append(p)
+    # quarantine folders (names ending with _trails, as created by the PixInsight script) are never scanned
+    files = [f for f in files
+             if not any(part.endswith("_trails") for part in os.path.normpath(os.path.dirname(f)).split(os.sep))]
     if a.move:
         mv = os.path.abspath(a.move)
         files = [f for f in files if not os.path.abspath(f).startswith(mv + os.sep)]

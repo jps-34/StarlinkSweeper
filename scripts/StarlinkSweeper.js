@@ -1,15 +1,20 @@
 #feature-id    StarlinkSweeper : Utilities > StarlinkSweeper
 #feature-info  Finds subframes crossed by satellite or aircraft trails, shows \
-   each detection on a preview, and lets you quarantine or erase the affected \
-   frames one by one. Nothing is deleted without confirmation.
+   each detection on a preview, and lets you quarantine (moved next to the \
+   scanned folder) or erase the affected frames one by one. Nothing is deleted \
+   without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.2
+ * StarlinkSweeper.js  v1.1.3
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.3: the quarantine folder is created NEXT TO the scanned folder
+ *   (<folder>_trails, same sub-folders inside) instead of inside it, so that a
+ *   stacking program importing the scanned folder never sees the quarantined
+ *   frames. Quarantine folders are skipped by the scan.
  * v1.1.2: installation hints for the Python modules per system (apt, pip or a
  *   virtual environment); wording only.
  * v1.1.1: the dialog no longer depends on capturing the scanner's standard
@@ -46,8 +51,9 @@
  * frame is scanned for straight trails (satellites, Starlink trains, aircraft);
  * flats, darks and bias found in the tree are skipped from their header. The
  * suspect frames are listed with a score and a preview showing the detected
- * trail, so you can check each one and quarantine it (moved to a _trails
- * sub-folder, reversible) or erase it (permanent, confirmed one by one).
+ * trail, so you can check each one and quarantine it (moved to a <folder>_trails
+ * folder next to the scanned folder, reversible) or erase it (permanent,
+ * confirmed one by one).
  *
  * Algorithm (same as the Python command-line version, python/starlinksweeper.py):
  *   1. bin x8 (mean), subtract a large-scale background, normalise to robust
@@ -73,7 +79,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.2";
+var VERSION = "1.1.3";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -94,7 +100,7 @@ var LIST_THRESHOLD = 20.0;   // fixed: frames and lines are listed from this sco
 var DEFAULT_ALERT = 60.0;    // adjustable: frames at or above this score are shown in red
 var SETTINGS_KEY = "StarlinkSweeper";
 var EXTENSIONS   = [".fit", ".fits", ".fts", ".xisf", ".FIT", ".FITS", ".FTS", ".XISF"];
-var QUARANTINE_DIR = "_trails";
+var QUARANTINE_SUFFIX = "_trails";   // quarantine folder: <parent of the scanned folder>/<scanned folder name>_trails
 
 // =============================================================== numeric core
 // (no PixInsight object below this line: this section is also run under node
@@ -594,12 +600,47 @@ function analyseFile(filePath, lightsOnly) {
    return res;
 }
 
+function normalizedDir(path) {
+   path = String(path).replace(/\\/g, "/");
+   while (path.length > 1 && path.charAt(path.length - 1) == "/") path = path.substring(0, path.length - 1);
+   return path;
+}
+
+function inQuarantine(path) {
+   // true when any folder on the path is a quarantine folder (name ending with _trails)
+   var parts = normalizedDir(path).split("/");
+   for (var i = 0; i < parts.length - 1; ++i)
+      if (parts[i].length > QUARANTINE_SUFFIX.length - 1 && parts[i].substring(parts[i].length - QUARANTINE_SUFFIX.length) == QUARANTINE_SUFFIX)
+         return true;
+   return false;
+}
+
+function quarantineRoot(scanFolder) {
+   // The quarantine lives NEXT TO the scanned folder, not inside it, so that a
+   // stacking program importing the scanned folder recursively never sees it:
+   // scanning /a/b/lights puts the frames under /a/b/lights_trails/<same sub-path>.
+   var root = normalizedDir(scanFolder);
+   var parent = File.extractDirectory(root), name = File.extractName(root) + File.extractExtension(root);
+   if (!parent.length || parent == root) return (root == "/" ? "" : root) + "/" + QUARANTINE_SUFFIX;
+   if (!name.length) name = "lights";
+   return parent + "/" + name + QUARANTINE_SUFFIX;
+}
+
+function makeDirs(path) {
+   // creates the folder and its missing parents
+   path = normalizedDir(path);
+   if (File.directoryExists(path)) return;
+   var parent = File.extractDirectory(path);
+   if (parent.length && parent != path && !File.directoryExists(parent)) makeDirs(parent);
+   File.createDirectory(path);
+}
+
 function listFrames(dir, recursive) {
    var files = [];
    for (var i = 0; i < EXTENSIONS.length; ++i) {
       var found = searchDirectory(dir + "/*" + EXTENSIONS[i], recursive);
       for (var k = 0; k < found.length; ++k)
-         if (found[k].indexOf("/" + QUARANTINE_DIR + "/") < 0 && files.indexOf(found[k]) < 0) files.push(found[k]);
+         if (!inQuarantine(found[k]) && files.indexOf(found[k]) < 0) files.push(found[k]);
    }
    files.sort();
    return files;
@@ -776,6 +817,7 @@ function SweeperDialog() {
    };
    this.recursiveCheck = new CheckBox(this);
    this.recursiveCheck.text = "Include sub-folders";
+   this.recursiveCheck.toolTip = "<p>Scan the sub-folders too. Quarantine folders (names ending with " + QUARANTINE_SUFFIX + ") are skipped.</p>";
    this.recursiveCheck.checked = readSetting("recursive", DataType_Boolean, true);
    this.lightsOnlyCheck = new CheckBox(this);
    this.lightsOnlyCheck.text = "Lights only";
@@ -923,18 +965,19 @@ function SweeperDialog() {
    // ---- actions
    this.quarantineButton = new PushButton(this);
    this.quarantineButton.text = "Quarantine";
-   this.quarantineButton.toolTip = "<p>Move the selected frame into a <b>" + QUARANTINE_DIR
-      + "</b> sub-folder next to it. Reversible: move it back by hand if needed.</p>";
+   this.quarantineButton.toolTip = "<p>Move the selected frame out of the scanned folder, into a <b>&lt;folder&gt;"
+      + QUARANTINE_SUFFIX + "</b> folder created next to it (same sub-folders inside), so that a stacking program "
+      + "importing the scanned folder never sees it again. Reversible: move it back by hand if needed.</p>";
    this.quarantineButton.onClick = function () { self.actOnCurrent("quarantine"); };
    this.quarantineAllButton = new PushButton(this);
    this.quarantineAllButton.text = "Quarantine all listed";
    this.quarantineAllButton.toolTip = "<p>Move every listed frame (score " + format("%.0f", LIST_THRESHOLD)
-      + " or more) into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
+      + " or more) to the quarantine folder next to the scanned folder.</p>";
    this.quarantineAllButton.onClick = function () { self.quarantineAll(false); };
    this.quarantineRedButton = new PushButton(this);
    this.quarantineRedButton.text = "Quarantine red";
    this.quarantineRedButton.toolTip = "<p>Move every frame shown in red (score at or above the <i>Red above</i> value) "
-      + "into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
+      + "to the quarantine folder next to the scanned folder.</p>";
    this.quarantineRedButton.onClick = function () { self.quarantineAll(true); };
    this.eraseButton = new PushButton(this);
    this.eraseButton.text = "Erase";
@@ -1409,9 +1452,13 @@ SweeperDialog.prototype.actOnCurrent = function (action) {
 };
 
 SweeperDialog.prototype.quarantine = function (r) {
-   var dir = File.extractDirectory(r.file) + "/" + QUARANTINE_DIR;
-   if (!File.directoryExists(dir)) File.createDirectory(dir);
-   var dst = dir + "/" + File.extractNameAndExtension(r.file);
+   // Moves the frame to <quarantine root>/<its sub-path under the scanned folder>,
+   // the quarantine root being next to the scanned folder (see quarantineRoot).
+   var root = normalizedDir(this.folder), qroot = quarantineRoot(root);
+   var file = normalizedDir(r.file);
+   var rel = (file.indexOf(root + "/") == 0) ? file.substring(root.length) : "/" + File.extractNameAndExtension(file);
+   var dst = qroot + rel;
+   makeDirs(File.extractDirectory(dst));
    if (File.exists(dst)) throw new Error("Already exists: " + dst);
    moveFile(r.file, dst);
    r.status = "quarantined";
@@ -1426,8 +1473,8 @@ SweeperDialog.prototype.quarantineAll = function (redOnly) {
       if (r.status == "" && r.score >= level && File.exists(r.file)) todo.push(r);
    }
    if (!todo.length) return;
-   var answer = new MessageBox(format("Move %d %sframe(s) into their %s sub-folder?", todo.length,
-                                      redOnly ? "red " : "", QUARANTINE_DIR),
+   var answer = new MessageBox(format("Move %d %sframe(s) to\n%s ?", todo.length,
+                                      redOnly ? "red " : "", quarantineRoot(this.folder)),
                                TITLE, StdIcon_Question, StdButton_Yes, StdButton_No).execute();
    if (answer != StdButton_Yes) return;
    for (var k = 0; k < todo.length; ++k) {

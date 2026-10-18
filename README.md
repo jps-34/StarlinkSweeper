@@ -37,19 +37,22 @@ integration. StarlinkSweeper finds it.
    are shown in red. A Starlink train shows as several parallel lines at the same angle.
 3. **Check.** Click a frame to see it on the preview, the detected trails drawn in red over their
    detected extent; double-click to open the sub at full resolution in PixInsight.
-4. **Act.** **Quarantine** moves the frame into a `_trails` sub-folder next to it (reversible, by
-   hand). **Erase** deletes it permanently, after a confirmation every time. **Quarantine red**
-   moves every frame shown in red (score at or above the *Red above* level), **Quarantine all
-   listed** the whole list. **Export CSV** writes the score of every scanned frame.
+4. **Act.** **Quarantine** moves the frame out of the scanned folder, into a `<folder>_trails`
+   folder created next to it with the same sub-folders inside (scanning `.../Target/S1` puts them
+   under `.../Target/S1_trails/...`), so that a stacking program importing the scanned folder
+   recursively never sees them again; reversible by hand. **Erase** deletes the frame permanently,
+   after a confirmation every time. **Quarantine red** moves every frame shown in red (score at or
+   above the *Red above* level), **Quarantine all listed** the whole list. **Export CSV** writes the
+   score of every scanned frame.
 
 The *Red above* slider re-colours the list without re-scanning. Nothing is ever modified in the
-frames themselves; frames already sitting in a `_trails` folder are skipped.
+frames themselves; quarantine folders (names ending with `_trails`) are never scanned.
 
 ## Requirements
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.2) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.1.3) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -87,7 +90,8 @@ menu.
 ## Quick start
 
 1. **Lights folder**: choose the root folder of the subs (one filter, one target, or the whole
-   night: it does not matter). *Include sub-folders* is on by default.
+   night: it does not matter). *Include sub-folders* is on by default. The quarantine will be
+   created next to this folder.
 2. **Scan**. Progress is shown in the dialog and in the console; **Stop** interrupts cleanly.
 3. Go through the list: click a frame, look at the preview, then **Quarantine** or **Erase**.
 4. Re-run the integration without the quarantined frames.
@@ -113,7 +117,7 @@ Without Python, or unticked, the scan runs in PixInsight on one core, one frame 
 | Setting | Meaning |
 |---|---|
 | **Lights folder** | Root folder to scan. FITS (`.fit`, `.fits`, `.fts`) and XISF files, any case. |
-| **Include sub-folders** | Recursive scan (on by default). Folders named `_trails` are skipped. |
+| **Include sub-folders** | Recursive scan (on by default). Quarantine folders (names ending with `_trails`) are skipped. |
 | **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
 | **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the listing level and this value deserve a look at the preview. Changing it re-colours the list without re-scanning. |
 | **Parallel scan with Python**, **Python**, **Script**, **Workers** | See *Parallel scan*. Python and script paths can be left empty (searched in the PATH and next to the installed script). |
@@ -130,13 +134,13 @@ Whatever the level, look at the preview before erasing.
 ```
 python3 python/starlinksweeper.py /path/to/lights -r                 # scan recursively, CSV report
 python3 python/starlinksweeper.py /path/to/lights -r --preview out/   # also a PNG per flagged frame
-python3 python/starlinksweeper.py /path/to/lights -r --move /path/to/lights/_trails
+python3 python/starlinksweeper.py /path/to/lights -r --move /path/to/lights_trails
 python3 python/starlinksweeper.py /path/to/lights -t 15 -j 4 -o report.csv --list flagged.txt
 ```
 
 Options: `-r` recursive, `-t` score from which a frame is flagged (default 20, the listing level of the script), `-j` parallel processes (default `auto`: one core is left free and the count is capped by the available memory, about 100 MB plus 5 bytes per pixel per worker; the chosen count and the reason are printed),
 `-o` CSV path, `--preview DIR` (PNG for flagged frames, `--preview-all` for every frame),
-`--move DIR` (move flagged frames, never deletes), `--list FILE` (flagged file names, one per
+`--move DIR` (move flagged frames, never deletes; put it next to the scanned folder, not inside), `--list FILE` (flagged file names, one per
 line, handy to deselect them in your stacking software), `--all-types` (also scan flats, darks and
 bias, which are skipped by default from their header). The CLI never deletes anything.
 

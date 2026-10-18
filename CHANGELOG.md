@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 (2026-10-18)
+* The quarantine folder is now created **next to** the scanned folder (`<folder>_trails`, same
+  sub-folders inside) instead of inside it, so that a stacking program importing the scanned folder
+  recursively never sees the quarantined frames. Quarantine folders are skipped by the scan, in the
+  script and in the command line.
+
 ## 1.1.2 (2026-10-18)
 * Installation hints for the Python modules per system (apt on Debian and Ubuntu, pip elsewhere,
   or a virtual environment) in the dialog and the READMEs; wording only.

@@ -41,20 +41,23 @@ l'intégration. StarlinkSweeper la trouve.
 3. **Vérification.** Un clic sur une brute l'affiche dans l'aperçu, les traînées détectées tracées
    en rouge sur leur étendue détectée ; un double-clic ouvre la brute en pleine résolution dans
    PixInsight.
-4. **Action.** **Quarantine** déplace la brute dans un sous-dossier `_trails` à côté d'elle
-   (réversible, à la main). **Erase** la supprime définitivement, après une confirmation à chaque
-   fois. **Quarantine red** déplace toutes les brutes affichées en rouge (score au niveau *Red
-   above* ou au-dessus), **Quarantine all listed** toute la liste. **Export CSV** écrit le score de
-   toutes les brutes scannées.
+4. **Action.** **Quarantine** sort la brute du dossier scanné, vers un dossier `<dossier>_trails`
+   créé à côté de lui avec les mêmes sous-dossiers (scanner `.../Target/S1` les range sous
+   `.../Target/S1_trails/...`), pour qu'un logiciel d'empilement qui importe le dossier scanné en
+   récursif ne les revoie jamais ; réversible à la main. **Erase** supprime la brute
+   définitivement, après une confirmation à chaque fois. **Quarantine red** déplace toutes les
+   brutes affichées en rouge (score au niveau *Red above* ou au-dessus), **Quarantine all listed**
+   toute la liste. **Export CSV** écrit le score de toutes les brutes scannées.
 
 Le curseur *Red above* recolore la liste sans relancer le scan. Les brutes elles-mêmes ne sont
-jamais modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
+jamais modifiées ; les dossiers de quarantaine (noms finissant par `_trails`) ne sont jamais
+scannés.
 
 ## Prérequis
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.2) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.1.3) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -92,7 +95,8 @@ menu *Script > Utilities*.
 ## Prise en main
 
 1. **Lights folder** : choisir le dossier racine des brutes (un filtre, une cible ou toute la
-   nuit, peu importe). *Include sub-folders* est coché par défaut.
+   nuit, peu importe). *Include sub-folders* est coché par défaut. La quarantaine sera créée à
+   côté de ce dossier.
 2. **Scan**. La progression s'affiche dans la boîte et dans la console ; **Stop** interrompt
    proprement.
 3. Parcourir la liste : cliquer sur une brute, regarder l'aperçu, puis **Quarantine** ou
@@ -122,7 +126,7 @@ brute à la fois.
 | Réglage | Signification |
 |---|---|
 | **Lights folder** | Dossier racine à scanner. Fichiers FITS (`.fit`, `.fits`, `.fts`) et XISF, quelle que soit la casse. |
-| **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers nommés `_trails` sont ignorés. |
+| **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers de quarantaine (noms finissant par `_trails`) sont ignorés. |
 | **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
 | **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le niveau de liste et cette valeur méritent un coup d'œil à l'aperçu. Le changer recolore la liste sans relancer le scan. |
 | **Parallel scan with Python**, **Python**, **Script**, **Workers** | Voir *Scan parallèle*. Les chemins de Python et du script peuvent rester vides (recherche dans le PATH et à côté du script installé). |
@@ -140,13 +144,13 @@ Quel que soit le niveau, regarder l'aperçu avant d'effacer.
 ```
 python3 python/starlinksweeper.py /chemin/brutes -r                   # scan récursif, rapport CSV
 python3 python/starlinksweeper.py /chemin/brutes -r --preview out/    # plus un PNG par brute signalée
-python3 python/starlinksweeper.py /chemin/brutes -r --move /chemin/brutes/_trails
+python3 python/starlinksweeper.py /chemin/brutes -r --move /chemin/brutes_trails
 python3 python/starlinksweeper.py /chemin/brutes -t 15 -j 4 -o rapport.csv --list signalees.txt
 ```
 
 Options : `-r` récursif, `-t` score à partir duquel une brute est signalée (20 par défaut, le niveau de liste du script), `-j` processus
 parallèles (`auto` par défaut : un cœur est laissé libre et le nombre est plafonné par la mémoire disponible, environ 100 Mo plus 5 octets par pixel et par processus ; le nombre retenu et la raison sont affichés), `-o` chemin du CSV, `--preview DIR` (PNG des brutes signalées,
-`--preview-all` pour toutes), `--move DIR` (déplace les brutes signalées, ne supprime jamais),
+`--preview-all` pour toutes), `--move DIR` (déplace les brutes signalées, ne supprime jamais ; à placer à côté du dossier scanné, pas dedans),
 `--list FICHIER` (noms des brutes signalées, un par ligne, pratique pour les décocher dans le
 logiciel d'empilement), `--all-types` (scanner aussi les flats, darks et bias, ignorés par défaut
 d'après leur en-tête). La ligne de commande ne supprime jamais rien.
