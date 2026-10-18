@@ -4,17 +4,18 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.2
+ * StarlinkSweeper.js  v1.0.3
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
- * v1.0.2: Stop takes effect within a second or two (checked between the stages
- *   of the analysis, not only between frames) and the button gives feedback.
- *   "Verbose log" option: one console line per stage of each frame, to locate
- *   where a scan stops. Frame type now read from the image window keywords
- *   after loading, instead of from the file format instance before loading.
+ * v1.0.3: 1.0.1 and 1.0.2 stopped with an error right after the first frame
+ *   (list refresh); fixed. Frame type read from the file keywords before
+ *   loading, window keywords as fallback. Stop takes effect within a second
+ *   or two (checked between the stages of the analysis, not only between
+ *   frames) and the button gives feedback. "Verbose log" option: one console
+ *   line per stage of each frame.
  * v1.0.1: only light frames are analysed; flats, darks and bias are recognised
  *   from their IMAGETYP (or FRAME / FRAMETYP) header and skipped ("Lights only"
  *   option, on by default). Frames without the keyword are scanned.
@@ -50,7 +51,7 @@
 #include <pjsr/ColorSpace.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.2";
+var VERSION = "1.0.3";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -472,7 +473,8 @@ function frameType(value) {
 }
 
 function frameTypeFromKeywords(keywords) {
-   // keywords: Array of FITSKeyword (ImageWindow.keywords). null if absent.
+   // keywords: Array of FITSKeyword (FileFormatInstance.keywords or
+   // ImageWindow.keywords). null if absent.
    if (!keywords) return null;
    for (var k = 0; k < TYPE_KEYWORDS.length; ++k)
       for (var i = 0; i < keywords.length; ++i)
@@ -504,6 +506,14 @@ function readBinnedImage(filePath, lightsOnly) {
    var d = f.open(filePath, "raw cfa verbosity 0");
    if (d.length < 1) throw new Error("Unable to open file " + filePath);
    stage("opened " + d[0].width + "x" + d[0].height + "x" + d[0].numberOfChannels);
+   var type = null;
+   if (lightsOnly) {
+      var fileKeywords = null;
+      try { fileKeywords = f.keywords; } catch (e) { stage("file keywords unavailable: " + e.message); }
+      type = frameTypeFromKeywords(fileKeywords);
+      stage("frame type " + (type == null ? "unknown" : type) + " (file keywords)");
+      if (type != null && type != "light") { f.close(); return { skipped: type }; }
+   }
    var window = new ImageWindow(d[0].width, d[0].height, d[0].numberOfChannels,
                                 32 /*bitsPerSample*/, true /*float*/,
                                 d[0].colorSpace != ColorSpace_Gray, "StarlinkSweeper_tmp");
@@ -515,11 +525,11 @@ function readBinnedImage(filePath, lightsOnly) {
       if (!f.readImage(view.image)) throw new Error("Unable to read image " + filePath);
       view.endProcess();
       f.close();
-      if (lightsOnly) {
-         var keywords = null;
-         try { keywords = window.keywords; } catch (e) { stage("keywords unavailable: " + e.message); }
-         var type = frameTypeFromKeywords(keywords);
-         stage("frame type " + (type == null ? "unknown" : type));
+      if (lightsOnly && type == null) {                 // fallback: keywords carried by the window
+         var winKeywords = null;
+         try { winKeywords = window.keywords; } catch (e) { stage("window keywords unavailable: " + e.message); }
+         type = frameTypeFromKeywords(winKeywords);
+         stage("frame type " + (type == null ? "unknown" : type) + " (window keywords)");
          if (type != null && type != "light") return { skipped: type };
       }
       checkAbort();
@@ -843,9 +853,11 @@ SweeperDialog.prototype.rebuildList = function () {
    var current = this.tree.currentNode ? this.tree.currentNode.resultIndex : -1;
    this.tree.clear();
    var order = [];
-   for (var i = 0; i < this.results.length; ++i)
-      if (this.results[i].status == "skipped") continue;
-      if (this.results[i].score >= this.threshold || this.results[i].status == "error") order.push(i);
+   for (var i = 0; i < this.results.length; ++i) {
+      var r0 = this.results[i];
+      if (r0.status == "skipped") continue;
+      if (r0.score >= this.threshold || r0.status == "error") order.push(i);
+   }
    var self = this;
    order.sort(function (a, b) { return self.results[b].score - self.results[a].score; });
    var again = null;

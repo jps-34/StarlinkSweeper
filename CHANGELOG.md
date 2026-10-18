@@ -1,11 +1,15 @@
 # Changelog
 
-## 1.0.2 (2026-10-18)
+## 1.0.3 (2026-10-18)
+* Fixes 1.0.1, which stopped with an error right after the first frame (list refresh) and left
+  the dialog frozen. 1.0.2 was a development build with the same fault and was never released.
+* The frame type is read from the file keywords before loading (a flat is not loaded at all), with
+  the image window keywords as fallback.
 * **Stop** now takes effect within a second or two: the scan checks for it between the stages of
   each frame's analysis, not only between frames, and the button gives immediate feedback. The
-  console's own abort does the same. No change to the detection results.
+  console's own abort does the same.
 * *Verbose log* option: one console line per stage of each frame (open, header, read, bin,
-  analyse), to locate where a scan stops. Header keywords are read defensively.
+  analyse), to locate where a scan stops.
 
 ## 1.0.1 (2026-10-18)
 * Only light frames are analysed: flats, darks and bias are recognised from their `IMAGETYP`
