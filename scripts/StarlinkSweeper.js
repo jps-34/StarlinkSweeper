@@ -4,12 +4,17 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.1
+ * StarlinkSweeper.js  v1.0.2
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.0.2: Stop takes effect within a second or two (checked between the stages
+ *   of the analysis, not only between frames) and the button gives feedback.
+ *   "Verbose log" option: one console line per stage of each frame, to locate
+ *   where a scan stops. Frame type now read from the image window keywords
+ *   after loading, instead of from the file format instance before loading.
  * v1.0.1: only light frames are analysed; flats, darks and bias are recognised
  *   from their IMAGETYP (or FRAME / FRAMETYP) header and skipped ("Lights only"
  *   option, on by default). Frames without the keyword are scanned.
@@ -45,7 +50,7 @@
 #include <pjsr/ColorSpace.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.1";
+var VERSION = "1.0.2";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -69,6 +74,14 @@ var QUARANTINE_DIR = "_trails";
 // =============================================================== numeric core
 // (no PixInsight object below this line: this section is also run under node
 //  for validation against the Python version)
+
+var abortRequested = null;   // set by the dialog to a function returning true to stop
+
+function checkAbort() {
+   // Lets the GUI breathe between heavy stages and stops the scan when asked.
+   if (typeof processEvents == "function") processEvents();
+   if (abortRequested && abortRequested()) throw new Error("__abort__");
+}
 
 function kthSmallest(a, n, k) {
    // Quickselect in place on a[0..n-1]: returns the k-th smallest (0-based).
@@ -357,7 +370,9 @@ function endpoints(thetaDeg, rho, u0, u1, w, h, binning) {
 
 function analyseBinned(s8, w8, h8) {
    // s8: bin-8 mean image (Float32Array). Returns the analysis result.
+   checkAbort();
    var norm = normalise(s8, w8, h8);
+   checkAbort();
    var z8 = norm.z, v8 = norm.valid;
    // bin 16 of the clipped map, valid where all four pixels are valid
    var w16 = Math.floor(w8 / 2), h16 = Math.floor(h8 / 2);
@@ -372,6 +387,7 @@ function analyseBinned(s8, w8, h8) {
    var nth = Math.round(180 / COARSE_STEP), thetas = new Float64Array(nth);
    for (var j = 0; j < nth; ++j) thetas[j] = j * COARSE_STEP;
    var S = P16.significance(thetas, 0.15 * Math.min(w16, h16));
+   checkAbort();
    var coarseBest = 0, pool = [];
    for (var o2 = 0; o2 < S.S.length; ++o2) {
       if (S.S[o2] > coarseBest) coarseBest = S.S[o2];
@@ -391,6 +407,7 @@ function analyseBinned(s8, w8, h8) {
    var P8 = new Projector(z8, v8, w8, h8), minlen8 = 0.15 * Math.min(w8, h8), lines = [];
    var nf = Math.round(2 * FINE_HALF / FINE_STEP) + 1;
    for (var ci = 0; ci < cand.length; ++ci) {
+      checkAbort();
       var th = new Float64Array(nf);
       for (var f = 0; f < nf; ++f) {
          var a = thetas[cand[ci].j] - FINE_HALF + f * FINE_STEP;
@@ -455,7 +472,7 @@ function frameType(value) {
 }
 
 function frameTypeFromKeywords(keywords) {
-   // keywords: Array of FITSKeyword (FileFormatInstance.keywords). null if absent.
+   // keywords: Array of FITSKeyword (ImageWindow.keywords). null if absent.
    if (!keywords) return null;
    for (var k = 0; k < TYPE_KEYWORDS.length; ++k)
       for (var i = 0; i < keywords.length; ++i)
@@ -466,38 +483,55 @@ function frameTypeFromKeywords(keywords) {
    return null;
 }
 
+var verboseLog = false;      // set by the dialog: one console line per stage of each frame
+
+function stage(msg) {
+   if (verboseLog) { console.writeln("<end><cbr>    " + msg); console.flush(); }
+}
+
 function readBinnedImage(filePath, lightsOnly) {
    // Opens the file in a hidden image window, bins it x8 (average) with
    // IntegerResample and returns {data, w, h, W, H}. Channel 0 only.
-   // With lightsOnly, a frame whose header says flat / dark / bias is not
-   // read: {skipped: type} is returned instead.
+   // With lightsOnly, a frame whose header says flat / dark / bias is closed
+   // right after reading: {skipped: type} is returned instead.
    var ext = File.extractExtension(filePath);
+   stage("format " + ext);
    var F = new FileFormat(ext, true /*toRead*/, false /*toWrite*/);
    if (F.isNull) throw new Error("No installed file format can read " + ext + " files");
    var f = new FileFormatInstance(F);
    if (f.isNull) throw new Error("Unable to instantiate file format " + F.name);
+   stage("open");
    var d = f.open(filePath, "raw cfa verbosity 0");
    if (d.length < 1) throw new Error("Unable to open file " + filePath);
-   if (lightsOnly) {
-      var type = frameTypeFromKeywords(f.keywords);
-      if (type != null && type != "light") { f.close(); return { skipped: type }; }
-   }
+   stage("opened " + d[0].width + "x" + d[0].height + "x" + d[0].numberOfChannels);
    var window = new ImageWindow(d[0].width, d[0].height, d[0].numberOfChannels,
                                 32 /*bitsPerSample*/, true /*float*/,
                                 d[0].colorSpace != ColorSpace_Gray, "StarlinkSweeper_tmp");
    var view = window.mainView;
    try {
+      checkAbort();
+      stage("read image");
       view.beginProcess(UndoFlag_NoSwapFile);
       if (!f.readImage(view.image)) throw new Error("Unable to read image " + filePath);
       view.endProcess();
       f.close();
+      if (lightsOnly) {
+         var keywords = null;
+         try { keywords = window.keywords; } catch (e) { stage("keywords unavailable: " + e.message); }
+         var type = frameTypeFromKeywords(keywords);
+         stage("frame type " + (type == null ? "unknown" : type));
+         if (type != null && type != "light") return { skipped: type };
+      }
+      checkAbort();
       var W = view.image.width, H = view.image.height;
+      stage("bin x" + FINE_BIN);
       var P = new IntegerResample;
       P.zoomFactor = -FINE_BIN;
       P.downsamplingMode = IntegerResample.prototype.Average;
       P.noGUIMessages = true;
       P.executeOn(view, false /*swapFile*/);
       var img = view.image, w = img.width, h = img.height;
+      stage("get samples " + w + "x" + h);
       var data = new Float32Array(w * h);
       img.getSamples(data, new Rect(0, 0, w, h), 0);
       var touched = false;
@@ -517,7 +551,9 @@ function analyseFile(filePath, lightsOnly) {
    var t0 = Date.now();
    var b = readBinnedImage(filePath, lightsOnly);
    if (b.skipped) return { file: filePath, skipped: b.skipped, score: -1, lines: [], status: "skipped", preview: null };
+   stage("analyse");
    var res = analyseBinned(b.data, b.w, b.h);
+   stage("done");
    res.file = filePath;
    res.width = b.W; res.height = b.H;
    res.seconds = (Date.now() - t0) / 1000;
@@ -584,6 +620,11 @@ function SweeperDialog() {
    this.lightsOnlyCheck.checked = true;
    this.lightsOnlyCheck.toolTip = "<p>Skip the frames whose header (IMAGETYP, FRAME or FRAMETYP) says flat, dark "
       + "or bias, so a whole night's folder can be scanned. Frames without the keyword are scanned.</p>";
+   this.verboseCheck = new CheckBox(this);
+   this.verboseCheck.text = "Verbose log";
+   this.verboseCheck.checked = false;
+   this.verboseCheck.toolTip = "<p>Write one console line per stage of each frame (open, header, read, bin, "
+      + "analyse). Useful to report a problem: the last line printed tells where the scan stopped.</p>";
 
    var folderSizer = new HorizontalSizer;
    folderSizer.spacing = 4;
@@ -594,6 +635,8 @@ function SweeperDialog() {
    folderSizer.add(this.recursiveCheck);
    folderSizer.addSpacing(8);
    folderSizer.add(this.lightsOnlyCheck);
+   folderSizer.addSpacing(8);
+   folderSizer.add(this.verboseCheck);
 
    // ---- threshold + scan
    this.thresholdControl = new NumericControl(this);
@@ -613,7 +656,11 @@ function SweeperDialog() {
    this.stopButton = new PushButton(this);
    this.stopButton.text = "Stop";
    this.stopButton.enabled = false;
-   this.stopButton.onClick = function () { self.stopRequested = true; };
+   this.stopButton.onClick = function () {
+      self.stopRequested = true;
+      self.stopButton.enabled = false;
+      self.progressLabel.text = "Stopping...";
+   };
 
    var scanSizer = new HorizontalSizer;
    scanSizer.spacing = 6;
@@ -730,6 +777,7 @@ function SweeperDialog() {
 SweeperDialog.prototype = new Dialog;
 
 SweeperDialog.prototype.scan = function () {
+   var self = this;
    if (this.scanning) return;
    if (!this.folder.length || !File.directoryExists(this.folder)) {
       new MessageBox("Please select the folder of your light frames first.", TITLE, StdIcon_Warning, StdButton_Ok).execute();
@@ -749,11 +797,15 @@ SweeperDialog.prototype.scan = function () {
    console.abortEnabled = true;
    console.writeln("<end><cbr><b>" + TITLE + " " + VERSION + "</b>: " + files.length + " frames in " + this.folder);
    var t0 = Date.now(), flagged = 0, skipped = 0, scanned = 0, lightsOnly = this.lightsOnlyCheck.checked;
+   var stopped = false;
+   verboseLog = this.verboseCheck.checked;
+   abortRequested = function () { return self.stopRequested || console.abortRequested; };
    for (var k = 0; k < files.length; ++k) {
-      if (this.stopRequested || console.abortRequested) { console.warningln("Scan stopped by user"); break; }
       this.progressLabel.text = format("Scanning %d / %d  (%d flagged, %d skipped)  %s", k + 1, files.length,
                                        flagged, skipped, File.extractNameAndExtension(files[k]));
       processEvents();
+      if (abortRequested()) { stopped = true; break; }
+      if (verboseLog) { console.writeln(format("<end><cbr>[%d/%d] %s", k + 1, files.length, files[k])); console.flush(); }
       try {
          var res = analyseFile(files[k], lightsOnly);
          if (res.skipped) {
@@ -771,15 +823,19 @@ SweeperDialog.prototype.scan = function () {
          console.writeln(format("[%d/%d] %s  score %.1f  %.1fs  %s", k + 1, files.length,
                                 File.extractNameAndExtension(files[k]), res.score, res.seconds, tag));
       } catch (e) {
+         if (e.message == "__abort__") { stopped = true; break; }
          console.criticalln("[" + (k + 1) + "/" + files.length + "] " + files[k] + ": " + e.message);
          this.results.push({ file: files[k], score: -1, lines: [], error: e.message, status: "error", preview: null });
       }
       this.rebuildList();
    }
+   abortRequested = null;
+   if (stopped) console.warningln("Scan stopped by user after " + this.results.length + " of " + files.length + " frames");
    this.scanning = false;
    this.scanButton.enabled = true; this.stopButton.enabled = false;
-   this.progressLabel.text = format("%d frames scanned in %.0f s, %d above threshold %.1f, %d skipped as non-light.",
-                                    scanned, (Date.now() - t0) / 1000, flagged, this.threshold, skipped);
+   this.progressLabel.text = format("%s%d frames scanned in %.0f s, %d above threshold %.1f, %d skipped as non-light.",
+                                    stopped ? "Stopped. " : "", scanned, (Date.now() - t0) / 1000, flagged,
+                                    this.threshold, skipped);
    console.writeln(this.progressLabel.text);
 };
 

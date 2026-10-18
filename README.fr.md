@@ -52,7 +52,7 @@ modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.1) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.0.2) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 

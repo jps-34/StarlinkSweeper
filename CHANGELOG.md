@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 (2026-10-18)
+* **Stop** now takes effect within a second or two: the scan checks for it between the stages of
+  each frame's analysis, not only between frames, and the button gives immediate feedback. The
+  console's own abort does the same. No change to the detection results.
+* *Verbose log* option: one console line per stage of each frame (open, header, read, bin,
+  analyse), to locate where a scan stops. Header keywords are read defensively.
+
 ## 1.0.1 (2026-10-18)
 * Only light frames are analysed: flats, darks and bias are recognised from their `IMAGETYP`
   (or `FRAME` / `FRAMETYP`) header and skipped, in the script (*Lights only* option, on by default)
