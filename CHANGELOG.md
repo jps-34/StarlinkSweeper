@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.6 (2026-10-18)
+* One adjustable level only, **Red above**. Frames and lines are listed from a fixed score of 20
+  up; the former threshold slider is gone. Weaker candidates, kept internally, are no longer drawn
+  on the preview nor counted. The command-line default (`-t`) is 20 as well.
+
 ## 1.0.5 (2026-10-18)
 * **Red above** level: frames whose best trail scores at or above it are shown in red in the list
   and counted in the summary; **Quarantine red** moves them all in one go; `red` column in the CSV.

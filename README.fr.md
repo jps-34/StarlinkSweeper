@@ -34,9 +34,10 @@ l'intégration. StarlinkSweeper la trouve.
    directions. Les flats, darks et bias présents dans l'arborescence sont reconnus à leur en-tête
    et ignorés : le dossier d'une nuit entière se scanne tel quel. Compter quelques secondes par
    brute de 60 Mpx.
-2. **Liste.** Les brutes dont la meilleure traînée dépasse le seuil sont listées, la plus forte en
-   premier, avec l'angle de la traînée et la fraction du champ qu'elle couvre. Un train Starlink
-   apparaît comme plusieurs lignes parallèles au même angle.
+2. **Liste.** Les brutes dont la meilleure traînée atteint un score de 20 sont listées, la plus
+   forte en premier, avec l'angle de la traînée et la fraction du champ qu'elle couvre ; à partir du
+   niveau réglable *Red above*, elles passent en rouge. Un train Starlink apparaît comme plusieurs
+   lignes parallèles au même angle.
 3. **Vérification.** Un clic sur une brute l'affiche dans l'aperçu, les traînées détectées tracées
    en rouge sur leur étendue détectée ; un double-clic ouvre la brute en pleine résolution dans
    PixInsight.
@@ -46,14 +47,14 @@ l'intégration. StarlinkSweeper la trouve.
    above* ou au-dessus), **Quarantine all listed** toute la liste. **Export CSV** écrit le score de
    toutes les brutes scannées.
 
-Le curseur de seuil refiltre la liste sans relancer le scan. Les brutes elles-mêmes ne sont jamais
-modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
+Le curseur *Red above* recolore la liste sans relancer le scan. Les brutes elles-mêmes ne sont
+jamais modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
 
 ## Prérequis
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.5) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.0.6) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -99,12 +100,15 @@ ressort loin au-dessus des autres.
 | **Lights folder** | Dossier racine à scanner. Fichiers FITS (`.fit`, `.fits`, `.fts`) et XISF, quelle que soit la casse. |
 | **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers nommés `_trails` sont ignorés. |
 | **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
-| **Threshold** | Score de continuité, en σ robuste, au-dessus duquel une brute est listée. Une brute propre est largement sous la valeur par défaut, une traînée visible plusieurs fois au-dessus. La valeur par défaut est volontairement basse : la baisser pour voir des candidats plus faibles, la monter si un champ à filaments brillants et rectilignes donne des fausses alertes. La changer refiltre la liste sans relancer le scan. |
-| **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le seuil et cette valeur méritent un coup d'œil à l'aperçu. |
+| **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le niveau de liste et cette valeur méritent un coup d'œil à l'aperçu. Le changer recolore la liste sans relancer le scan. |
 
-Seuil, niveau rouge, options et dernier dossier sont mémorisés d'une session à l'autre.
+Brutes et lignes sont listées à partir d'un score fixe de 20. Le score est une significativité en
+unités du bruit de la brute elle-même (voir *Comment ça marche*), donc ce niveau ne dépend ni du
+temps de pose, ni du gain, ni de la caméra : une brute propre reste loin dessous, une traînée
+visible arrive plusieurs fois au-dessus. Niveau rouge, options et dernier dossier sont mémorisés
+d'une session à l'autre.
 
-Quel que soit le seuil, regarder l'aperçu avant d'effacer.
+Quel que soit le niveau, regarder l'aperçu avant d'effacer.
 
 ## Ligne de commande
 
@@ -115,7 +119,7 @@ python3 python/starlinksweeper.py /chemin/brutes -r --move /chemin/brutes/_trail
 python3 python/starlinksweeper.py /chemin/brutes -t 15 -j 4 -o rapport.csv --list signalees.txt
 ```
 
-Options : `-r` récursif, `-t` seuil (même valeur par défaut que le script), `-j` processus
+Options : `-r` récursif, `-t` score à partir duquel une brute est signalée (20 par défaut, le niveau de liste du script), `-j` processus
 parallèles (cpu-1 par défaut), `-o` chemin du CSV, `--preview DIR` (PNG des brutes signalées,
 `--preview-all` pour toutes), `--move DIR` (déplace les brutes signalées, ne supprime jamais),
 `--list FICHIER` (noms des brutes signalées, un par ligne, pratique pour les décocher dans le
@@ -144,16 +148,16 @@ d'après leur en-tête). La ligne de commande ne supprime jamais rien.
 Validé sur un jeu synthétique plein format (ciel propre, nuage, fort gradient, filaments
 brillants, aigrettes, traînées de très faibles à saturées, train de satellites, avion, traînée ne
 couvrant qu'une partie du champ ; `tests/make_synthetic_subs.py`) et sur de vraies brutes : toutes
-les traînées sont détectées et les brutes propres restent largement sous le seuil ; seul le cas
-limite des filaments brillants s'en approche. Le script PixInsight et la version en ligne de
+les traînées sont détectées et les brutes propres restent largement sous le niveau de liste ; seul
+le cas limite des filaments brillants s'en approche. Le script PixInsight et la version en ligne de
 commande donnent les mêmes scores à la décimale.
 
 ### Limites
 
 * Les traînées très faibles (sous environ 0,5 σ par pixel dans la brute) ne sont pas détectées ;
   elles ne laissent rien de mesurable dans un master non plus.
-* Des filaments de nébuleuse longs, brillants et très rectilignes peuvent s'approcher du seuil.
-  L'aperçu sert à ça.
+* Des filaments de nébuleuse longs, brillants et très rectilignes peuvent s'approcher du niveau de
+  liste. L'aperçu sert à ça.
 * Les traînées plus courtes qu'un quart du champ sont ignorées par construction.
 * La version en ligne de commande ne lit pas les XISF compressés (le script PixInsight, si).
 

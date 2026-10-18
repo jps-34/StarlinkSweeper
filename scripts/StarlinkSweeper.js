@@ -4,18 +4,20 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.5
+ * StarlinkSweeper.js  v1.0.6
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.0.6: one adjustable level only, "Red above". Frames and lines are listed
+ *   from a fixed score of 20 up; weaker candidates are no longer drawn.
  * v1.0.5: "Red above" level: frames at or above it are shown in red and can be
  *   quarantined in one go ("Quarantine red"); red count in the summary and a
  *   "red" column in the CSV. Threshold, red level, options and last folder are
  *   remembered between sessions.
  * v1.0.4: the line under the preview is reset when a new scan starts and shows
- *   live counts (scanned, above threshold, skipped) whenever no frame is
+ *   live counts (scanned, listed, skipped) whenever no frame is
  *   selected; the details of a selected frame follow the list refreshes.
  * v1.0.3: 1.0.1 and 1.0.2 stopped with an error right after the first frame
  *   (list refresh); fixed. Frame type read from the file keywords before
@@ -59,7 +61,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.5";
+var VERSION = "1.0.6";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -72,12 +74,12 @@ var MIN_RUN      = 6;      // minimum consecutive significant segments
 var SEG_MIN_SIG  = 1.5;    // sigma, a segment is significant above this
 var SPIKE_MAX_RUN = 18;    // a line through a saturated star is a spike unless longer
 var MAX_CAND     = 8;      // coarse candidates refined per frame
-var FLOOR        = 4.0;    // internal detection floor (the user threshold only filters)
+var FLOOR        = 4.0;    // internal detection floor (the listing level only filters)
 var MARGIN       = 12;     // binned pixels ignored along the frame edges
 var STAR_SUM     = 4000;   // 3x3 block sum (binned sigma) above which a star is "saturated"
 var MAX_LINES    = 5;      // lines reported per frame
-var DEFAULT_THRESHOLD = 10.0;
-var DEFAULT_ALERT = 60.0;    // frames at or above this score are shown in red
+var LIST_THRESHOLD = 20.0;   // fixed: frames and lines are listed from this score up
+var DEFAULT_ALERT = 60.0;    // adjustable: frames at or above this score are shown in red
 var SETTINGS_KEY = "StarlinkSweeper";
 var EXTENSIONS   = [".fit", ".fits", ".fts", ".xisf", ".FIT", ".FITS", ".FTS", ".XISF"];
 var QUARANTINE_DIR = "_trails";
@@ -614,7 +616,7 @@ function SweeperDialog() {
    var self = this;
 
    this.results = [];          // all analysed frames
-   this.threshold = readSetting("threshold", DataType_Double, DEFAULT_THRESHOLD);
+   this.threshold = LIST_THRESHOLD;
    this.alert = readSetting("alert", DataType_Double, DEFAULT_ALERT);
    this.folder = readSetting("folder", DataType_String, "");
    if (this.folder.length && !File.directoryExists(this.folder)) this.folder = "";
@@ -670,18 +672,7 @@ function SweeperDialog() {
    folderSizer.addSpacing(8);
    folderSizer.add(this.verboseCheck);
 
-   // ---- threshold + scan
-   this.thresholdControl = new NumericControl(this);
-   this.thresholdControl.label.text = "Threshold:";
-   this.thresholdControl.setRange(4, 60);
-   this.thresholdControl.slider.setRange(0, 560);
-   this.thresholdControl.setPrecision(1);
-   this.thresholdControl.setValue(this.threshold);
-   this.thresholdControl.toolTip = "<p>Continuity score (in robust sigma) above which a frame is listed.</p>"
-      + "<p>Clean frames score well below the default, a visible trail several times above it. "
-      + "Changing the threshold re-filters the list without re-scanning.</p>";
-   this.thresholdControl.onValueUpdated = function (v) { self.threshold = v; self.rebuildList(); };
-
+   // ---- red level + scan
    this.alertControl = new NumericControl(this);
    this.alertControl.label.text = "Red above:";
    this.alertControl.setRange(4, 300);
@@ -690,7 +681,9 @@ function SweeperDialog() {
    this.alertControl.setValue(this.alert);
    this.alertControl.toolTip = "<p>Frames whose best trail scores at or above this value are shown in red: "
       + "trails that strong are never a false alarm, so they can be quarantined in one go with "
-      + "<b>Quarantine red</b>. Frames between the threshold and this value deserve a look at the preview.</p>";
+      + "<b>Quarantine red</b>.</p><p>Frames are listed from a score of " + format("%.0f", LIST_THRESHOLD)
+      + " up; those between that level and this value deserve a look at the preview. "
+      + "Changing the value re-colours the list without re-scanning.</p>";
    this.alertControl.onValueUpdated = function (v) { self.alert = v; self.rebuildList(); };
 
    this.scanButton = new PushButton(this);
@@ -707,9 +700,7 @@ function SweeperDialog() {
 
    var scanSizer = new HorizontalSizer;
    scanSizer.spacing = 6;
-   scanSizer.add(this.thresholdControl, 50);
-   scanSizer.addSpacing(8);
-   scanSizer.add(this.alertControl, 50);
+   scanSizer.add(this.alertControl, 100);
    scanSizer.addSpacing(8);
    scanSizer.add(this.scanButton);
    scanSizer.add(this.stopButton);
@@ -731,8 +722,8 @@ function SweeperDialog() {
    this.tree.alternateRowColor = true;
    this.tree.multipleSelection = false;
    this.tree.setMinSize(this.logicalPixelsToPhysical(520), this.logicalPixelsToPhysical(260));
-   this.tree.toolTip = "<p>Frames whose best trail score is above the threshold, strongest first. "
-      + "Click a frame to see the detected trail on the preview.</p>";
+   this.tree.toolTip = "<p>Frames whose best trail scores " + format("%.0f", LIST_THRESHOLD) + " or more, strongest first; "
+      + "in red from the <i>Red above</i> level. Click a frame to see the detected trail on the preview.</p>";
    this.tree.onCurrentNodeUpdated = function (node) { self.showPreview(node ? node.resultIndex : -1); };
    this.tree.onNodeDoubleClicked = function (node) { self.openInPixInsight(node.resultIndex); };
 
@@ -744,7 +735,8 @@ function SweeperDialog() {
    this.quarantineButton.onClick = function () { self.actOnCurrent("quarantine"); };
    this.quarantineAllButton = new PushButton(this);
    this.quarantineAllButton.text = "Quarantine all listed";
-   this.quarantineAllButton.toolTip = "<p>Move every listed frame into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
+   this.quarantineAllButton.toolTip = "<p>Move every listed frame (score " + format("%.0f", LIST_THRESHOLD)
+      + " or more) into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
    this.quarantineAllButton.onClick = function () { self.quarantineAll(false); };
    this.quarantineRedButton = new PushButton(this);
    this.quarantineRedButton.text = "Quarantine red";
@@ -872,7 +864,7 @@ SweeperDialog.prototype.scan = function () {
          res.status = "";
          this.results.push(res);
          ++scanned;
-         var tag = res.score >= this.threshold ? format("TRAIL x%d", res.lines.length) : "ok";
+         var tag = res.score >= this.threshold ? format("TRAIL x%d", this.shownLines(res).length) : "ok";
          if (res.score >= this.threshold) ++flagged;
          console.writeln(format("[%d/%d] %s  score %.1f  %.1fs  %s", k + 1, files.length,
                                 File.extractNameAndExtension(files[k]), res.score, res.seconds, tag));
@@ -889,14 +881,13 @@ SweeperDialog.prototype.scan = function () {
    this.scanButton.enabled = true; this.stopButton.enabled = false;
    var cur = this.tree.currentNode;
    this.showPreview(cur ? cur.resultIndex : -1);
-   this.progressLabel.text = format("%s%d frames scanned in %.0f s, %d above threshold %.1f, %d skipped as non-light.",
+   this.progressLabel.text = format("%s%d frames scanned in %.0f s, %d listed (score %.0f or more), %d skipped as non-light.",
                                     stopped ? "Stopped. " : "", scanned, (Date.now() - t0) / 1000, flagged,
                                     this.threshold, skipped);
    console.writeln(this.progressLabel.text);
 };
 
 SweeperDialog.prototype.saveSettings = function () {
-   writeSetting("threshold", DataType_Double, this.threshold);
    writeSetting("alert", DataType_Double, this.alert);
    writeSetting("recursive", DataType_Boolean, this.recursiveCheck.checked);
    writeSetting("lightsOnly", DataType_Boolean, this.lightsOnlyCheck.checked);
@@ -923,9 +914,9 @@ SweeperDialog.prototype.rebuildList = function () {
          node.setToolTip(5, r.error);
          continue;
       }
-      var L = r.lines.length ? r.lines[0] : null;
+      var shown = this.shownLines(r), L = shown.length ? shown[0] : null;
       node.setText(0, format("%.1f", r.score));
-      node.setText(1, String(r.lines.length));
+      node.setText(1, String(shown.length));
       node.setText(2, L ? format("%.1f°", L.angle) : "");
       node.setText(3, L ? format("%d%%", Math.round(100 * L.run / N_SEG)) : "");
       node.setText(4, r.status);
@@ -955,8 +946,9 @@ SweeperDialog.prototype.buildBitmap = function (r) {
    var g = new Graphics(bmp);
    g.antialiasing = true;
    g.pen = new Pen(0xFFFF4040, 2);
-   for (var i = 0; i < r.lines.length; ++i) {
-      var L = r.lines[i];
+   var shown = this.shownLines(r);
+   for (var i = 0; i < shown.length; ++i) {
+      var L = shown[i];
       g.drawLine(L.x0 / FINE_BIN, L.y0 / FINE_BIN, L.x1 / FINE_BIN, L.y1 / FINE_BIN);
    }
    g.end();
@@ -964,8 +956,16 @@ SweeperDialog.prototype.buildBitmap = function (r) {
 };
 
 SweeperDialog.prototype.setBitmap = function (bmp, index) {
-   this.bitmap = bmp; this.bitmapIndex = index;
+   this.bitmap = bmp; this.bitmapIndex = index; this.bitmapThreshold = this.threshold;
    this.preview.update();
+};
+
+SweeperDialog.prototype.shownLines = function (r) {
+   // Lines are kept down to the internal floor; only those at or above the
+   // listing level are shown.
+   var out = [];
+   for (var i = 0; i < r.lines.length; ++i) if (r.lines[i].score >= this.threshold) out.push(r.lines[i]);
+   return out;
 };
 
 SweeperDialog.prototype.summaryText = function () {
@@ -981,7 +981,7 @@ SweeperDialog.prototype.summaryText = function () {
       if (r.status == "quarantined" || r.status == "erased") ++done;
    }
    if (!this.results.length) return this.scanning ? "Scanning..." : "No scan yet.";
-   var t = format("%d frame%s scanned, <b>%d above threshold %.1f</b>", scanned, scanned > 1 ? "s" : "", above, this.threshold);
+   var t = format("%d frame%s scanned, <b>%d listed</b> (score %.0f or more)", scanned, scanned > 1 ? "s" : "", above, this.threshold);
    if (red) t += format(", <font color=\"#d02020\"><b>%d at or above %.1f</b></font>", red, this.alert);
    if (skipped) t += format(", %d skipped as non-light", skipped);
    if (errors) t += format(", %d in error", errors);
@@ -995,12 +995,13 @@ SweeperDialog.prototype.showPreview = function (index) {
       this.setBitmap(null, -1); this.previewInfo.text = this.summaryText(); return;
    }
    var r = this.results[index];
-   if (this.bitmapIndex != index) this.setBitmap(this.buildBitmap(r), index);
+   if (this.bitmapIndex != index || this.bitmapThreshold != this.threshold) this.setBitmap(this.buildBitmap(r), index);
    var info = "<b>" + File.extractNameAndExtension(r.file) + "</b> &nbsp; score " + format("%.1f", r.score)
       + (r.score >= this.alert ? format(" <font color=\"#d02020\"><b>(at or above the red level %.1f)</b></font>", this.alert) : "")
       + " &nbsp; " + r.width + "x" + r.height;
-   for (var i = 0; i < r.lines.length; ++i) {
-      var L = r.lines[i];
+   var shown = this.shownLines(r);
+   for (var i = 0; i < shown.length; ++i) {
+      var L = shown[i];
       info += format("<br>line %d: score %.1f, angle %.2f°, %d%% of the frame, from (%d, %d) to (%d, %d)",
                      i + 1, L.score, L.angle, Math.round(100 * L.run / N_SEG), L.x0, L.y0, L.x1, L.y1);
    }
@@ -1086,14 +1087,14 @@ SweeperDialog.prototype.exportCSV = function () {
       var r = this.results[i];
       if (r.status == "error") { text += csvEscape(r.file) + ",,,,,,error,," + csvEscape(r.error) + "\n"; continue; }
       if (r.status == "skipped") { text += csvEscape(r.file) + ",,,,,,skipped: " + r.skipped + ",,\n"; continue; }
-      var desc = [];
-      for (var k = 0; k < r.lines.length; ++k) {
-         var L = r.lines[k];
+      var desc = [], shown = this.shownLines(r);
+      for (var k = 0; k < shown.length; ++k) {
+         var L = shown[k];
          desc.push(format("%.1f@%.2f:%d,%d-%d,%d", L.score, L.angle, L.x0, L.y0, L.x1, L.y1));
       }
       text += csvEscape(r.file) + "," + (r.score >= this.threshold ? 1 : 0) + "," + (r.score >= this.alert ? 1 : 0) + ","
             + format("%.1f", r.score) + ","
-            + format("%.1f", r.coarse) + "," + r.lines.length + "," + r.status + "," + csvEscape(desc.join(" | ")) + ",\n";
+            + format("%.1f", r.coarse) + "," + shown.length + "," + r.status + "," + csvEscape(desc.join(" | ")) + ",\n";
    }
    File.writeTextFile(sfd.fileName, text);
    console.writeln("Report written to " + sfd.fileName);

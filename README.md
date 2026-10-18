@@ -32,9 +32,9 @@ integration. StarlinkSweeper finds it.
    background-subtracted and searched for straight lines in every direction. Flats, darks and bias
    found in the tree are recognised from their header and skipped, so a whole night's folder can be
    scanned as it is. Expect a few seconds per 60 Mpx frame.
-2. **List.** Frames whose best trail scores above the threshold are listed, strongest first, with
-   the angle of the trail and the fraction of the frame it covers. A Starlink train shows as several
-   parallel lines at the same angle.
+2. **List.** Frames whose best trail scores 20 or more are listed, strongest first, with the angle
+   of the trail and the fraction of the frame it covers; from the adjustable *Red above* level they
+   are shown in red. A Starlink train shows as several parallel lines at the same angle.
 3. **Check.** Click a frame to see it on the preview, the detected trails drawn in red over their
    detected extent; double-click to open the sub at full resolution in PixInsight.
 4. **Act.** **Quarantine** moves the frame into a `_trails` sub-folder next to it (reversible, by
@@ -42,14 +42,14 @@ integration. StarlinkSweeper finds it.
    moves every frame shown in red (score at or above the *Red above* level), **Quarantine all
    listed** the whole list. **Export CSV** writes the score of every scanned frame.
 
-The threshold slider re-filters the list without re-scanning. Nothing is ever modified in the
+The *Red above* slider re-colours the list without re-scanning. Nothing is ever modified in the
 frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 ## Requirements
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.5) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.0.6) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -93,12 +93,14 @@ far above the others.
 | **Lights folder** | Root folder to scan. FITS (`.fit`, `.fits`, `.fts`) and XISF files, any case. |
 | **Include sub-folders** | Recursive scan (on by default). Folders named `_trails` are skipped. |
 | **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
-| **Threshold** | Continuity score, in robust σ, above which a frame is listed. Clean frames score well below the default, a visible trail several times above it. The default is deliberately low: lower it to see weaker candidates, raise it if a field with bright straight filaments produces false alarms. Changing it re-filters the list without re-scanning. |
-| **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the threshold and this value deserve a look at the preview. |
+| **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the listing level and this value deserve a look at the preview. Changing it re-colours the list without re-scanning. |
 
-Threshold, red level, options and the last folder are remembered from one session to the next.
+Frames and lines are listed from a fixed score of 20 up. The score is a significance in units of
+the frame's own noise (see *How it works*), so this level does not depend on exposure, gain or
+camera: clean frames stay far below it, a visible trail lands several times above it. Red level,
+options and the last folder are remembered from one session to the next.
 
-Whatever the threshold, look at the preview before erasing.
+Whatever the level, look at the preview before erasing.
 
 ## Command line
 
@@ -109,7 +111,7 @@ python3 python/starlinksweeper.py /path/to/lights -r --move /path/to/lights/_tra
 python3 python/starlinksweeper.py /path/to/lights -t 15 -j 4 -o report.csv --list flagged.txt
 ```
 
-Options: `-r` recursive, `-t` threshold (same default as the script), `-j` parallel processes (default cpu-1),
+Options: `-r` recursive, `-t` score from which a frame is flagged (default 20, the listing level of the script), `-j` parallel processes (default cpu-1),
 `-o` CSV path, `--preview DIR` (PNG for flagged frames, `--preview-all` for every frame),
 `--move DIR` (move flagged frames, never deletes), `--list FILE` (flagged file names, one per
 line, handy to deselect them in your stacking software), `--all-types` (also scan flats, darks and
@@ -134,15 +136,15 @@ bias, which are skipped by default from their header). The CLI never deletes any
 Validated on a synthetic full-frame set (clean sky, cloud, strong gradient, bright filaments,
 diffraction spikes, trails from very faint to saturated, a satellite train, an aircraft, a trail
 covering only part of the frame; `tests/make_synthetic_subs.py`) and on real subs: every trail is
-detected and clean frames stay well below the threshold; only the bright-filament stress case comes
-close to it. The PixInsight script and the command-line version give the same scores to the
+detected and clean frames stay well below the listing level; only the bright-filament stress case
+comes near it. The PixInsight script and the command-line version give the same scores to the
 decimal.
 
 ### Limits
 
 * Very faint trails (below about 0.5 σ per pixel in the sub) are not detected; they leave nothing
   measurable in a master either.
-* Long, bright and very straight nebula filaments can come close to the threshold. That is what the
+* Long, bright and very straight nebula filaments can come near the listing level. That is what the
   preview is for.
 * Trails shorter than a quarter of the frame are ignored by design.
 * The command-line version does not read compressed XISF files (the PixInsight script does).

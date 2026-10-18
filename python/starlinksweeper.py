@@ -33,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -292,7 +292,7 @@ def endpoints(theta_deg, rho, u0, u1, shape, binning):
     return f(pts[0][0]), f(pts[0][1]), f(pts[1][0]), f(pts[1][1])
 
 
-def analyse(path, threshold=10.0, max_lines=5):
+def analyse(path, threshold=20.0, max_lines=5):
     t0 = time.time()
     img = read_image(path)
     H, W = img.shape
@@ -397,8 +397,8 @@ def main():
     ap = argparse.ArgumentParser(description="Flag subframes that contain satellite / aircraft trails.")
     ap.add_argument("inputs", nargs="+", help="files or folders (FITS / uncompressed XISF)")
     ap.add_argument("-r", "--recursive", action="store_true", help="scan sub-folders")
-    ap.add_argument("-t", "--threshold", type=float, default=10.0,
-                    help="continuity score (robust sigma) above which a frame is flagged [10]")
+    ap.add_argument("-t", "--threshold", type=float, default=20.0,
+                    help="continuity score (robust sigma) from which a frame is flagged [20, the listing level of the PixInsight script]")
     ap.add_argument("-j", "--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1),
                     help="parallel processes [cpu-1]")
     ap.add_argument("-o", "--csv", default="starlinksweeper_report.csv", help="CSV report path")
