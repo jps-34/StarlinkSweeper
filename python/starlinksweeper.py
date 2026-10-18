@@ -33,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -185,8 +185,8 @@ def available_memory():
         return None
 
 
-def probe(inputs):
-    """Machine capacity for a front-end: JSON on stdout."""
+def probe(inputs, out_file=None):
+    """Machine capacity for a front-end: JSON on stdout (and in out_file if given)."""
     import json
     sample = None
     for p in inputs:
@@ -209,9 +209,13 @@ def probe(inputs):
     by_mem = max(1, int(avail * 0.75 // per_worker)) if avail else cpus
     suggested = max(1, min(max(1, cpus - 1), by_mem))
     maximum = max(1, min(cpus, by_mem))
-    print(json.dumps({"version": VERSION, "cpus": cpus, "available_gb": round(avail / 1e9, 2) if avail else None,
-                      "frame_mpx": round((px or 0) / 1e6, 1), "per_worker_gb": round(per_worker / 1e9, 2),
-                      "suggested_workers": suggested, "max_workers": maximum}), flush=True)
+    text = json.dumps({"version": VERSION, "cpus": cpus, "available_gb": round(avail / 1e9, 2) if avail else None,
+                       "frame_mpx": round((px or 0) / 1e6, 1), "per_worker_gb": round(per_worker / 1e9, 2),
+                       "suggested_workers": suggested, "max_workers": maximum})
+    print(text, flush=True)
+    if out_file:
+        with open(out_file, "w") as f:
+            f.write(text + "\n")
 
 
 def auto_jobs(sample_path):
@@ -514,9 +518,12 @@ def main():
                     help="also print one '#JSON {...}' line per frame, for front-ends")
     ap.add_argument("--probe", action="store_true",
                     help="print the machine capacity as JSON (cpus, memory, suggested and maximum workers) and exit")
+    ap.add_argument("--out", metavar="FILE", help="with --probe: also write the JSON to this file")
+    ap.add_argument("--progress-file", metavar="FILE",
+                    help="append one JSON record per frame to this file while scanning (for front-ends)")
     a = ap.parse_args()
     if a.probe:
-        probe(a.inputs)
+        probe(a.inputs, a.out)
         return
 
     files = []
@@ -534,6 +541,8 @@ def main():
         sys.exit("no FITS/XISF files found")
     if a.preview:
         os.makedirs(a.preview, exist_ok=True)
+    if a.progress_file:
+        open(a.progress_file, "w").close()                 # start empty, the front-end polls it
     if str(a.jobs).lower() in ("auto", "0"):
         jobs, why = auto_jobs(files[0])
     else:
@@ -556,7 +565,7 @@ def main():
                 tag = "TRAIL x%d" % res["n_lines"] if res["flagged"] else "ok"
                 print("[%d/%d] %-58s score %6.1f (peak %5.1f) %5.1fs  %s"
                       % (k, len(files), name[:58], res["score"], res["coarse"], res["seconds"], tag), flush=True)
-            if a.json_lines:
+            if a.json_lines or a.progress_file:
                 import json
                 if "error" in res:
                     rec = {"file": res["file"], "status": "error", "error": res["error"]}
@@ -567,7 +576,14 @@ def main():
                            "width": res["width"], "height": res["height"], "seconds": res["seconds"],
                            "lines": [{"score": l["score"], "angle": l["angle"], "run": l["run"],
                                       "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"]} for l in res["lines"]]}
-                print("#JSON " + json.dumps(rec), flush=True)
+                line = "#JSON " + json.dumps(rec)
+                if a.json_lines:
+                    print(line, flush=True)
+                if a.progress_file:
+                    with open(a.progress_file, "a") as pf:
+                        pf.write(line + "\n")
+                        pf.flush()
+                        os.fsync(pf.fileno())
 
     with open(a.csv, "w", newline="") as f:
         wr = csv.writer(f)

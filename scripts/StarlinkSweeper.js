@@ -4,12 +4,15 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.0
+ * StarlinkSweeper.js  v1.1.1
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.1: the dialog no longer depends on capturing the scanner's standard
+ *   output: Python version and machine probe go through files, scan progress
+ *   through a progress file; the detection reports why each candidate failed.
  * v1.1.0: parallel scan through the command-line version (starlinksweeper.py,
  *   installed with this script) when Python 3 with numpy, scipy and astropy is
  *   available: "Parallel scan with Python" option, Workers slider bounded by
@@ -68,7 +71,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.0";
+var VERSION = "1.1.1";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -629,40 +632,75 @@ function byteArrayToString(ba) {
    return "";
 }
 
+function processStream(p, which) {
+   // Text waiting on a process stream (read once, cleared). The accessor name
+   // differs between PixInsight builds, so several are tried; "" when none works.
+   var names = (which == "err") ? ["stderr", "standardError", "readStandardError"]
+                                : ["stdout", "standardOutput", "readStandardOutput"];
+   for (var i = 0; i < names.length; ++i) {
+      try {
+         var v = p[names[i]];
+         if (typeof v == "function") v = v.call(p);
+         if (v != null) return byteArrayToString(v);
+      } catch (e) { }
+   }
+   return "";
+}
+
 function runCapture(program, args, timeoutMs) {
    // Runs a program to completion; returns {ok, code, out, err}; never throws.
+   // The exit code is the reliable part; stdout capture is best effort.
    var r = { ok: false, code: -1, out: "", err: "" };
    try {
       var p = new ExternalProcess;
       p.start(program, args);
       if (!p.waitForStarted(5000)) { r.err = "could not start " + program; return r; }
-      if (!p.waitForFinished(timeoutMs)) { try { p.kill(); } catch (e) { } r.err = "timeout"; return r; }
-      r.out = byteArrayToString(p.readStandardOutput());
-      r.err = byteArrayToString(p.readStandardError());
+      if (!p.waitForFinished(timeoutMs)) { try { p.kill(); } catch (e) { } r.err = "timeout after " + timeoutMs + " ms"; return r; }
+      r.out = processStream(p, "out");
+      r.err = processStream(p, "err");
       r.code = p.exitCode;
       r.ok = (r.code == 0);
+      if (!r.ok && !r.err.length) r.err = "exit code " + r.code;
    } catch (e) { r.err = e.message; }
    return r;
 }
 
+function tempFile(tag) {
+   return File.systemTempDirectory + "/StarlinkSweeper_" + tag + "_" + Date.now() + ".txt";
+}
+
+function readWholeFile(path) {
+   try { return File.exists(path) ? File.readLines(path).join("\n") : ""; } catch (e) { return ""; }
+}
+
+function removeFile(path) {
+   try { if (File.exists(path)) File.remove(path); } catch (e) { }
+}
+
 function findPython(preferred) {
    // {prog, pre, version, deps} for the first interpreter that runs; deps tells
-   // whether numpy, scipy and astropy import. null when no Python runs at all.
+   // whether numpy, scipy and astropy import. null when no Python runs at all;
+   // then findPython.lastError says what happened with each candidate.
    var cands = [];
    if (preferred && preferred.length) cands.push({ prog: preferred, pre: [] });
    cands.push({ prog: "python3", pre: [] }, { prog: "python", pre: [] }, { prog: "py", pre: ["-3"] });
-   var found = null;
+   var found = null, errors = [];
    for (var i = 0; i < cands.length; ++i) {
-      var c = cands[i];
-      var r = runCapture(c.prog, c.pre.concat(["-c", "import sys; print(sys.version.split()[0])"]), 20000);
-      if (!r.ok) continue;
+      var c = cands[i], vfile = tempFile("pyver");
+      // the version goes through a file: exit codes are reliable, stdout capture is not everywhere
+      var r = runCapture(c.prog, c.pre.concat(["-c", "import sys; open(sys.argv[1], 'w').write(sys.version.split()[0])", vfile]), 20000);
+      var version = readWholeFile(vfile).trim();
+      removeFile(vfile);
+      if (!r.ok) { errors.push(c.prog + ": " + r.err); continue; }
       var d = runCapture(c.prog, c.pre.concat(["-c", "import numpy, scipy, astropy"]), 60000);
-      var hit = { prog: c.prog, pre: c.pre, version: r.out.trim(), deps: d.ok };
+      var hit = { prog: c.prog, pre: c.pre, version: version.length ? version : "3", deps: d.ok };
       if (d.ok) return hit;
       if (!found) found = hit;
    }
+   findPython.lastError = errors.join(" | ");
    return found;
 }
+findPython.lastError = "";
 
 function findCli(preferred) {
    // The command-line script: a path given by the user, or next to the
@@ -992,7 +1030,9 @@ SweeperDialog.prototype.probeExternal = function () {
    processEvents();
    var py = findPython(this.pythonEdit.text.trim());
    if (!py) {
-      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path.";
+      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path. ("
+         + findPython.lastError.substring(0, 300) + ")";
+      console.warningln("StarlinkSweeper: Python not found: " + findPython.lastError);
       this.updateScannerUi(); return;
    }
    if (!py.deps) {
@@ -1006,13 +1046,17 @@ SweeperDialog.prototype.probeExternal = function () {
          + "under src/scripts/StarlinkSweeper/; otherwise locate it with the button.";
       this.updateScannerUi(); return;
    }
-   var args = py.pre.concat([cli, "--probe"]);
+   var pfile = tempFile("probe");
+   var args = py.pre.concat([cli, "--probe", "--out", pfile]);
    if (this.folder.length) args.push(this.folder);
    var r = runCapture(py.prog, args, 60000);
+   var text = readWholeFile(pfile).trim();
+   removeFile(pfile);
+   if (!text.length) text = r.out.trim().split("\n").pop() || "";
    var info = null;
-   try { info = JSON.parse(r.out.trim().split("\n").pop()); } catch (e) { info = null; }
+   try { info = JSON.parse(text); } catch (e) { info = null; }
    if (!r.ok || !info) {
-      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " did not answer:</font> " + (r.err || r.out).trim().substring(0, 200);
+      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " did not answer:</font> " + (r.err || r.out || "no output").trim().substring(0, 200);
       this.updateScannerUi(); return;
    }
    this.ext.python = py; this.ext.cli = cli;
@@ -1064,14 +1108,22 @@ SweeperDialog.prototype.ensurePreview = function (r) {
 
 SweeperDialog.prototype.scanExternal = function (files) {
    var self = this, py = this.ext.python, t0 = Date.now();
+   var progress = tempFile("progress");
    var args = py.pre.concat(["-u", this.ext.cli, this.folder, "-t", format("%.1f", this.threshold),
                              "-j", String(Math.max(1, this.workers)), "-o", File.systemTempDirectory + "/StarlinkSweeper_last.csv",
-                             "--json-lines"]);
+                             "--progress-file", progress]);
    if (this.recursiveCheck.checked) args.push("-r");
    if (!this.lightsOnlyCheck.checked) args.push("--all-types");
    console.writeln("Running " + py.prog + " " + args.join(" "));
    var p = new ExternalProcess;
-   var counts = { done: 0, flagged: 0, skipped: 0, scanned: 0 }, stopped = false, buf = "";
+   var counts = { done: 0, flagged: 0, skipped: 0, scanned: 0 }, stopped = false, buf = "", consumed = 0;
+   var pollProgress = function () {
+      // the scanner appends one '#JSON' record per frame; take the new ones
+      var lines;
+      try { lines = File.exists(progress) ? File.readLines(progress) : []; } catch (e) { return; }
+      for (; consumed < lines.length; ++consumed)
+         if (lines[consumed].indexOf("#JSON ") == 0) handleLine(lines[consumed]);
+   };
    var handleLine = function (line) {
       line = line.replace(/\r$/, "");
       if (!line.length) return;
@@ -1096,21 +1148,19 @@ SweeperDialog.prototype.scanExternal = function (files) {
       while (p.isRunning) {
          processEvents();
          if (this.stopRequested || console.abortRequested) { stopped = true; try { p.kill(); } catch (e) { } break; }
-         var chunk = byteArrayToString(p.readStandardOutput());
+         pollProgress();
+         var chunk = processStream(p, "out");            // console echo only, best effort
          if (chunk.length) {
             buf += chunk;
             var parts = buf.split("\n");
             buf = parts.pop();
-            for (var i = 0; i < parts.length; ++i) handleLine(parts[i]);
-         } else {
-            pause(0.1);
+            for (var i = 0; i < parts.length; ++i) if (parts[i].indexOf("#JSON ") != 0) handleLine(parts[i]);
          }
+         pause(0.2);
       }
+      pollProgress();
       if (!stopped) {
-         buf += byteArrayToString(p.readStandardOutput());
-         var rest = buf.split("\n");
-         for (var k = 0; k < rest.length; ++k) handleLine(rest[k]);
-         var err = byteArrayToString(p.readStandardError()).trim();
+         var err = processStream(p, "err").trim();
          if (p.exitCode != 0) console.criticalln("Scanner exit code " + p.exitCode + (err.length ? ": " + err.substring(0, 500) : ""));
          else if (err.length) console.warningln(err.substring(0, 500));
       }
@@ -1118,6 +1168,7 @@ SweeperDialog.prototype.scanExternal = function (files) {
       console.criticalln("External scanner: " + e.message);
       try { if (p.isRunning) p.kill(); } catch (e2) { }
    }
+   removeFile(progress);
    return { stopped: stopped, scanned: counts.scanned, flagged: counts.flagged, skipped: counts.skipped, seconds: (Date.now() - t0) / 1000 };
 };
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 (2026-10-18)
+* The parallel scan no longer depends on capturing the scanner's standard output, which is not
+  available in every PixInsight build: the Python version and the machine probe go through files,
+  and the scan progress through a progress file written by the command line (`--progress-file`).
+  When Python is not found, the status line says what happened with each interpreter tried.
+
 ## 1.1.0 (2026-10-18)
 * **Parallel scan**: the dialog can delegate the scan to the bundled command-line version
   (`starlinksweeper.py`, installed next to the script, same algorithm and scores), which analyses
