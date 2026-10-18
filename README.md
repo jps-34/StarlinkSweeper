@@ -38,9 +38,9 @@ integration. StarlinkSweeper finds it.
 3. **Check.** Click a frame to see it on the preview, the detected trails drawn in red over their
    detected extent; double-click to open the sub at full resolution in PixInsight.
 4. **Act.** **Quarantine** moves the frame into a `_trails` sub-folder next to it (reversible, by
-   hand). **Erase** deletes it permanently, after a confirmation every time. **Quarantine all
-   listed** does the first one for the whole list. **Export CSV** writes the score of every scanned
-   frame.
+   hand). **Erase** deletes it permanently, after a confirmation every time. **Quarantine red**
+   moves every frame shown in red (score at or above the *Red above* level), **Quarantine all
+   listed** the whole list. **Export CSV** writes the score of every scanned frame.
 
 The threshold slider re-filters the list without re-scanning. Nothing is ever modified in the
 frames themselves; frames already sitting in a `_trails` folder are skipped.
@@ -49,7 +49,7 @@ frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.4) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.0.5) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -94,6 +94,9 @@ far above the others.
 | **Include sub-folders** | Recursive scan (on by default). Folders named `_trails` are skipped. |
 | **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
 | **Threshold** | Continuity score, in robust σ, above which a frame is listed. Clean frames score well below the default, a visible trail several times above it. The default is deliberately low: lower it to see weaker candidates, raise it if a field with bright straight filaments produces false alarms. Changing it re-filters the list without re-scanning. |
+| **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the threshold and this value deserve a look at the preview. |
+
+Threshold, red level, options and the last folder are remembered from one session to the next.
 
 Whatever the threshold, look at the preview before erasing.
 

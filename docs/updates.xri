@@ -5,8 +5,8 @@
       <p>Add https://jps-34.github.io/StarlinkSweeper/ under Resources &gt; Updates &gt; Manage Repositories.</p>
    </description>
    <platform os="all" arch="noarch" version="1.9.4:1.9.99">
-      <package fileName="StarlinkSweeper-1.0.4-PI194.zip" sha1="724ace4275a827b473fb5f7beb8187377d44ab21" type="script" releaseDate="20261018" serverURL="https://jps-34.github.io/StarlinkSweeper/">
-         <title>StarlinkSweeper 1.0.4 (PixInsight 1.9.4 and later)</title>
+      <package fileName="StarlinkSweeper-1.0.5-PI194.zip" sha1="b1f1dd0bc387c6068019000ec6c506f7f34139f9" type="script" releaseDate="20261018" serverURL="https://jps-34.github.io/StarlinkSweeper/">
+         <title>StarlinkSweeper 1.0.5 (PixInsight 1.9.4 and later)</title>
          <description>
             <p>Scans a folder tree of light frames (FITS / XISF) for satellite, Starlink train and aircraft trails, lists the affected frames with a score, shows each detection on a preview, and lets you quarantine (move to a _trails sub-folder) or erase them one by one with confirmation. Installs under Script &gt; Utilities &gt; StarlinkSweeper.</p>
             <p>Copyright (c) 2026 Jacques Pouyaud. MIT License. Source: https://github.com/jps-34/StarlinkSweeper</p>

@@ -4,12 +4,16 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.4
+ * StarlinkSweeper.js  v1.0.5
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.0.5: "Red above" level: frames at or above it are shown in red and can be
+ *   quarantined in one go ("Quarantine red"); red count in the summary and a
+ *   "red" column in the CSV. Threshold, red level, options and last folder are
+ *   remembered between sessions.
  * v1.0.4: the line under the preview is reset when a new scan starts and shows
  *   live counts (scanned, above threshold, skipped) whenever no frame is
  *   selected; the details of a selected frame follow the list refreshes.
@@ -52,9 +56,10 @@
 #include <pjsr/NumericControl.jsh>
 #include <pjsr/UndoFlag.jsh>
 #include <pjsr/ColorSpace.jsh>
+#include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.4";
+var VERSION = "1.0.5";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -72,6 +77,8 @@ var MARGIN       = 12;     // binned pixels ignored along the frame edges
 var STAR_SUM     = 4000;   // 3x3 block sum (binned sigma) above which a star is "saturated"
 var MAX_LINES    = 5;      // lines reported per frame
 var DEFAULT_THRESHOLD = 10.0;
+var DEFAULT_ALERT = 60.0;    // frames at or above this score are shown in red
+var SETTINGS_KEY = "StarlinkSweeper";
 var EXTENSIONS   = [".fit", ".fits", ".fts", ".xisf", ".FIT", ".FITS", ".FTS", ".XISF"];
 var QUARANTINE_DIR = "_trails";
 
@@ -591,6 +598,15 @@ function moveFile(src, dst) {
 
 function csvEscape(s) { return '"' + String(s).replace(/"/g, '""') + '"'; }
 
+function readSetting(key, type, fallback) {
+   var v = Settings.read(SETTINGS_KEY + "/" + key, type);
+   return Settings.lastReadOK ? v : fallback;
+}
+
+function writeSetting(key, type, value) {
+   try { Settings.write(SETTINGS_KEY + "/" + key, type, value); } catch (e) { /* settings are a convenience */ }
+}
+
 // ------------------------------------------------------------------- dialog
 function SweeperDialog() {
    this.__base__ = Dialog;
@@ -598,8 +614,10 @@ function SweeperDialog() {
    var self = this;
 
    this.results = [];          // all analysed frames
-   this.threshold = DEFAULT_THRESHOLD;
-   this.folder = "";
+   this.threshold = readSetting("threshold", DataType_Double, DEFAULT_THRESHOLD);
+   this.alert = readSetting("alert", DataType_Double, DEFAULT_ALERT);
+   this.folder = readSetting("folder", DataType_String, "");
+   if (this.folder.length && !File.directoryExists(this.folder)) this.folder = "";
    this.stopRequested = false;
    this.scanning = false;
    this.bitmap = null;         // preview of the current frame
@@ -614,6 +632,7 @@ function SweeperDialog() {
    this.folderLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
    this.folderEdit = new Edit(this);
    this.folderEdit.readOnly = true;
+   this.folderEdit.text = this.folder;
    this.folderEdit.toolTip = "Root folder of the light frames to scan (FITS / XISF).";
    this.folderButton = new ToolButton(this);
    this.folderButton.icon = this.scaledResource(":/icons/select-file.png");
@@ -627,10 +646,10 @@ function SweeperDialog() {
    };
    this.recursiveCheck = new CheckBox(this);
    this.recursiveCheck.text = "Include sub-folders";
-   this.recursiveCheck.checked = true;
+   this.recursiveCheck.checked = readSetting("recursive", DataType_Boolean, true);
    this.lightsOnlyCheck = new CheckBox(this);
    this.lightsOnlyCheck.text = "Lights only";
-   this.lightsOnlyCheck.checked = true;
+   this.lightsOnlyCheck.checked = readSetting("lightsOnly", DataType_Boolean, true);
    this.lightsOnlyCheck.toolTip = "<p>Skip the frames whose header (IMAGETYP, FRAME or FRAMETYP) says flat, dark "
       + "or bias, so a whole night's folder can be scanned. Frames without the keyword are scanned.</p>";
    this.verboseCheck = new CheckBox(this);
@@ -657,11 +676,22 @@ function SweeperDialog() {
    this.thresholdControl.setRange(4, 60);
    this.thresholdControl.slider.setRange(0, 560);
    this.thresholdControl.setPrecision(1);
-   this.thresholdControl.setValue(DEFAULT_THRESHOLD);
+   this.thresholdControl.setValue(this.threshold);
    this.thresholdControl.toolTip = "<p>Continuity score (in robust sigma) above which a frame is listed.</p>"
       + "<p>Clean frames score well below the default, a visible trail several times above it. "
       + "Changing the threshold re-filters the list without re-scanning.</p>";
    this.thresholdControl.onValueUpdated = function (v) { self.threshold = v; self.rebuildList(); };
+
+   this.alertControl = new NumericControl(this);
+   this.alertControl.label.text = "Red above:";
+   this.alertControl.setRange(4, 300);
+   this.alertControl.slider.setRange(0, 592);
+   this.alertControl.setPrecision(1);
+   this.alertControl.setValue(this.alert);
+   this.alertControl.toolTip = "<p>Frames whose best trail scores at or above this value are shown in red: "
+      + "trails that strong are never a false alarm, so they can be quarantined in one go with "
+      + "<b>Quarantine red</b>. Frames between the threshold and this value deserve a look at the preview.</p>";
+   this.alertControl.onValueUpdated = function (v) { self.alert = v; self.rebuildList(); };
 
    this.scanButton = new PushButton(this);
    this.scanButton.text = "Scan";
@@ -677,7 +707,10 @@ function SweeperDialog() {
 
    var scanSizer = new HorizontalSizer;
    scanSizer.spacing = 6;
-   scanSizer.add(this.thresholdControl, 100);
+   scanSizer.add(this.thresholdControl, 50);
+   scanSizer.addSpacing(8);
+   scanSizer.add(this.alertControl, 50);
+   scanSizer.addSpacing(8);
    scanSizer.add(this.scanButton);
    scanSizer.add(this.stopButton);
 
@@ -712,7 +745,12 @@ function SweeperDialog() {
    this.quarantineAllButton = new PushButton(this);
    this.quarantineAllButton.text = "Quarantine all listed";
    this.quarantineAllButton.toolTip = "<p>Move every listed frame into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
-   this.quarantineAllButton.onClick = function () { self.quarantineAll(); };
+   this.quarantineAllButton.onClick = function () { self.quarantineAll(false); };
+   this.quarantineRedButton = new PushButton(this);
+   this.quarantineRedButton.text = "Quarantine red";
+   this.quarantineRedButton.toolTip = "<p>Move every frame shown in red (score at or above the <i>Red above</i> value) "
+      + "into its <b>" + QUARANTINE_DIR + "</b> sub-folder.</p>";
+   this.quarantineRedButton.onClick = function () { self.quarantineAll(true); };
    this.eraseButton = new PushButton(this);
    this.eraseButton.text = "Erase";
    this.eraseButton.icon = this.scaledResource(":/icons/delete.png");
@@ -728,12 +766,13 @@ function SweeperDialog() {
    this.csvButton.onClick = function () { self.exportCSV(); };
    this.closeButton = new PushButton(this);
    this.closeButton.text = "Close";
-   this.closeButton.onClick = function () { self.ok(); };
+   this.closeButton.onClick = function () { self.saveSettings(); self.ok(); };
 
    var actionSizer = new HorizontalSizer;
    actionSizer.spacing = 6;
    actionSizer.add(this.quarantineButton);
    actionSizer.add(this.quarantineAllButton);
+   actionSizer.add(this.quarantineRedButton);
    actionSizer.add(this.eraseButton);
    actionSizer.add(this.openButton);
    actionSizer.addStretch();
@@ -796,6 +835,7 @@ SweeperDialog.prototype.scan = function () {
       new MessageBox("Please select the folder of your light frames first.", TITLE, StdIcon_Warning, StdButton_Ok).execute();
       return;
    }
+   writeSetting("folder", DataType_String, this.folder);
    var files = listFrames(this.folder, this.recursiveCheck.checked);
    if (files.length == 0) {
       new MessageBox("No FITS / XISF file found in\n" + this.folder, TITLE, StdIcon_Warning, StdButton_Ok).execute();
@@ -855,6 +895,14 @@ SweeperDialog.prototype.scan = function () {
    console.writeln(this.progressLabel.text);
 };
 
+SweeperDialog.prototype.saveSettings = function () {
+   writeSetting("threshold", DataType_Double, this.threshold);
+   writeSetting("alert", DataType_Double, this.alert);
+   writeSetting("recursive", DataType_Boolean, this.recursiveCheck.checked);
+   writeSetting("lightsOnly", DataType_Boolean, this.lightsOnlyCheck.checked);
+   if (this.folder.length) writeSetting("folder", DataType_String, this.folder);
+};
+
 SweeperDialog.prototype.rebuildList = function () {
    var current = this.tree.currentNode ? this.tree.currentNode.resultIndex : -1;
    this.tree.clear();
@@ -884,6 +932,12 @@ SweeperDialog.prototype.rebuildList = function () {
       node.setText(5, File.extractNameAndExtension(r.file));
       node.setToolTip(5, r.file);
       for (var c = 0; c < 4; ++c) node.setAlignment(c, TextAlign_Right);
+      if (r.score >= this.alert) {
+         for (var c3 = 0; c3 < 6; ++c3) {
+            try { node.setTextColor(c3, 0xFFD02020); } catch (e) { }
+         }
+         if (!r.status.length) node.setToolTip(0, format("Score %.1f: at or above the red level %.1f", r.score, this.alert));
+      }
       if (order[k] == current) again = node;
    }
    for (var c2 = 0; c2 < 6; ++c2) this.tree.adjustColumnWidthToContents(c2);
@@ -916,17 +970,19 @@ SweeperDialog.prototype.setBitmap = function (bmp, index) {
 
 SweeperDialog.prototype.summaryText = function () {
    // What the info line shows when no frame is selected: live counts.
-   var scanned = 0, above = 0, skipped = 0, errors = 0, done = 0;
+   var scanned = 0, above = 0, red = 0, skipped = 0, errors = 0, done = 0;
    for (var i = 0; i < this.results.length; ++i) {
       var r = this.results[i];
       if (r.status == "skipped") { ++skipped; continue; }
       if (r.status == "error") { ++errors; continue; }
       ++scanned;
       if (r.score >= this.threshold) ++above;
+      if (r.score >= this.alert) ++red;
       if (r.status == "quarantined" || r.status == "erased") ++done;
    }
    if (!this.results.length) return this.scanning ? "Scanning..." : "No scan yet.";
    var t = format("%d frame%s scanned, <b>%d above threshold %.1f</b>", scanned, scanned > 1 ? "s" : "", above, this.threshold);
+   if (red) t += format(", <font color=\"#d02020\"><b>%d at or above %.1f</b></font>", red, this.alert);
    if (skipped) t += format(", %d skipped as non-light", skipped);
    if (errors) t += format(", %d in error", errors);
    if (done) t += format(", %d quarantined or erased", done);
@@ -941,6 +997,7 @@ SweeperDialog.prototype.showPreview = function (index) {
    var r = this.results[index];
    if (this.bitmapIndex != index) this.setBitmap(this.buildBitmap(r), index);
    var info = "<b>" + File.extractNameAndExtension(r.file) + "</b> &nbsp; score " + format("%.1f", r.score)
+      + (r.score >= this.alert ? format(" <font color=\"#d02020\"><b>(at or above the red level %.1f)</b></font>", this.alert) : "")
       + " &nbsp; " + r.width + "x" + r.height;
    for (var i = 0; i < r.lines.length; ++i) {
       var L = r.lines[i];
@@ -988,14 +1045,15 @@ SweeperDialog.prototype.quarantine = function (r) {
    console.writeln("Moved " + r.file + " -> " + dst);
 };
 
-SweeperDialog.prototype.quarantineAll = function () {
-   var todo = [];
+SweeperDialog.prototype.quarantineAll = function (redOnly) {
+   var todo = [], level = redOnly ? Math.max(this.alert, this.threshold) : this.threshold;
    for (var i = 0; i < this.results.length; ++i) {
       var r = this.results[i];
-      if (r.score >= this.threshold && r.status == "" && File.exists(r.file)) todo.push(r);
+      if (r.status == "" && r.score >= level && File.exists(r.file)) todo.push(r);
    }
    if (!todo.length) return;
-   var answer = new MessageBox(format("Move %d frame(s) into their %s sub-folder?", todo.length, QUARANTINE_DIR),
+   var answer = new MessageBox(format("Move %d %sframe(s) into their %s sub-folder?", todo.length,
+                                      redOnly ? "red " : "", QUARANTINE_DIR),
                                TITLE, StdIcon_Question, StdButton_Yes, StdButton_No).execute();
    if (answer != StdButton_Yes) return;
    for (var k = 0; k < todo.length; ++k) {
@@ -1023,17 +1081,18 @@ SweeperDialog.prototype.exportCSV = function () {
    sfd.filters = [["CSV files", "*.csv"]];
    sfd.initialPath = this.folder + "/StarlinkSweeper_report.csv";
    if (!sfd.execute()) return;
-   var text = "file,flagged,score,coarse_peak,n_lines,status,lines(score@angle:x0,y0-x1,y1),error\n";
+   var text = "file,flagged,red,score,coarse_peak,n_lines,status,lines(score@angle:x0,y0-x1,y1),error\n";
    for (var i = 0; i < this.results.length; ++i) {
       var r = this.results[i];
-      if (r.status == "error") { text += csvEscape(r.file) + ",,,,,error,," + csvEscape(r.error) + "\n"; continue; }
-      if (r.status == "skipped") { text += csvEscape(r.file) + ",,,,,skipped: " + r.skipped + ",,\n"; continue; }
+      if (r.status == "error") { text += csvEscape(r.file) + ",,,,,,error,," + csvEscape(r.error) + "\n"; continue; }
+      if (r.status == "skipped") { text += csvEscape(r.file) + ",,,,,,skipped: " + r.skipped + ",,\n"; continue; }
       var desc = [];
       for (var k = 0; k < r.lines.length; ++k) {
          var L = r.lines[k];
          desc.push(format("%.1f@%.2f:%d,%d-%d,%d", L.score, L.angle, L.x0, L.y0, L.x1, L.y1));
       }
-      text += csvEscape(r.file) + "," + (r.score >= this.threshold ? 1 : 0) + "," + format("%.1f", r.score) + ","
+      text += csvEscape(r.file) + "," + (r.score >= this.threshold ? 1 : 0) + "," + (r.score >= this.alert ? 1 : 0) + ","
+            + format("%.1f", r.score) + ","
             + format("%.1f", r.coarse) + "," + r.lines.length + "," + r.status + "," + csvEscape(desc.join(" | ")) + ",\n";
    }
    File.writeTextFile(sfd.fileName, text);

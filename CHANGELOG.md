@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5 (2026-10-18)
+* **Red above** level: frames whose best trail scores at or above it are shown in red in the list
+  and counted in the summary; **Quarantine red** moves them all in one go; `red` column in the CSV.
+* Threshold, red level, options and the last folder are remembered between sessions.
+
 ## 1.0.4 (2026-10-18)
 * The information line under the preview is reset when a new scan starts and shows live counts
   (frames scanned, above threshold, skipped) whenever no frame is selected; the details of a

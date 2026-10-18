@@ -42,8 +42,9 @@ l'intégration. StarlinkSweeper la trouve.
    PixInsight.
 4. **Action.** **Quarantine** déplace la brute dans un sous-dossier `_trails` à côté d'elle
    (réversible, à la main). **Erase** la supprime définitivement, après une confirmation à chaque
-   fois. **Quarantine all listed** fait la première opération pour toute la liste. **Export CSV**
-   écrit le score de toutes les brutes scannées.
+   fois. **Quarantine red** déplace toutes les brutes affichées en rouge (score au niveau *Red
+   above* ou au-dessus), **Quarantine all listed** toute la liste. **Export CSV** écrit le score de
+   toutes les brutes scannées.
 
 Le curseur de seuil refiltre la liste sans relancer le scan. Les brutes elles-mêmes ne sont jamais
 modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
@@ -52,7 +53,7 @@ modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.4) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.0.5) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -99,6 +100,9 @@ ressort loin au-dessus des autres.
 | **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers nommés `_trails` sont ignorés. |
 | **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
 | **Threshold** | Score de continuité, en σ robuste, au-dessus duquel une brute est listée. Une brute propre est largement sous la valeur par défaut, une traînée visible plusieurs fois au-dessus. La valeur par défaut est volontairement basse : la baisser pour voir des candidats plus faibles, la monter si un champ à filaments brillants et rectilignes donne des fausses alertes. La changer refiltre la liste sans relancer le scan. |
+| **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le seuil et cette valeur méritent un coup d'œil à l'aperçu. |
+
+Seuil, niveau rouge, options et dernier dossier sont mémorisés d'une session à l'autre.
 
 Quel que soit le seuil, regarder l'aperçu avant d'effacer.
 
