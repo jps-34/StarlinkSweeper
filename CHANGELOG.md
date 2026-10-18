@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.5 (2026-10-18)
+* The machine probe (Detect) works with no folder selected; the command line refused the call,
+  so Detect failed right after a Reset.
+
 ## 1.1.4 (2026-10-18)
 * **Reset** button, PixInsight style at the bottom left: forgets every remembered setting (red
   level, options, Python and script paths, workers, last folder) and restores the defaults.

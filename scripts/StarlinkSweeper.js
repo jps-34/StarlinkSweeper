@@ -5,12 +5,14 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.4
+ * StarlinkSweeper.js  v1.1.5
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.5: the machine probe works with no folder selected (the command line
+ *   refused it, so Detect failed right after a Reset).
  * v1.1.4: Reset button (PixInsight style, bottom left) that forgets every
  *   remembered setting; the scanner status shows the path of the command-line
  *   script in use and warns when its version differs from the script's.
@@ -82,7 +84,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.4";
+var VERSION = "1.1.5";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.

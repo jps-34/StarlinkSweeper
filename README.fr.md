@@ -57,7 +57,7 @@ scannés.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.4) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.1.5) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 

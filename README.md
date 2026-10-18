@@ -52,7 +52,7 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.4) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.1.5) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 

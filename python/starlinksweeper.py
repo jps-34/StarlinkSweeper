@@ -33,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.1.4"
+VERSION = "1.1.5"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -501,7 +501,7 @@ def worker(args):
 
 def main():
     ap = argparse.ArgumentParser(description="Flag subframes that contain satellite / aircraft trails.")
-    ap.add_argument("inputs", nargs="+", help="files or folders (FITS / uncompressed XISF)")
+    ap.add_argument("inputs", nargs="*", help="files or folders (FITS / uncompressed XISF)")
     ap.add_argument("-r", "--recursive", action="store_true", help="scan sub-folders")
     ap.add_argument("-t", "--threshold", type=float, default=20.0,
                     help="continuity score (robust sigma) from which a frame is flagged [20, the listing level of the PixInsight script]")
@@ -525,8 +525,10 @@ def main():
                     help="append one JSON record per frame to this file while scanning (for front-ends)")
     a = ap.parse_args()
     if a.probe:
-        probe(a.inputs, a.out)
+        probe(a.inputs, a.out)                      # works without any input: a 60 Mpx frame is assumed
         return
+    if not a.inputs:
+        ap.error("at least one file or folder is required")
 
     files = []
     for p in a.inputs:
