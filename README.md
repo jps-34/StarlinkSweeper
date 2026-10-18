@@ -49,7 +49,7 @@ frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.3) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.0.4) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 

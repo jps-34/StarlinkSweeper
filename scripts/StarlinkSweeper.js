@@ -4,12 +4,15 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.3
+ * StarlinkSweeper.js  v1.0.4
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.0.4: the line under the preview is reset when a new scan starts and shows
+ *   live counts (scanned, above threshold, skipped) whenever no frame is
+ *   selected; the details of a selected frame follow the list refreshes.
  * v1.0.3: 1.0.1 and 1.0.2 stopped with an error right after the first frame
  *   (list refresh); fixed. Frame type read from the file keywords before
  *   loading, window keywords as fallback. Stop takes effect within a second
@@ -51,7 +54,7 @@
 #include <pjsr/ColorSpace.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.3";
+var VERSION = "1.0.4";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -759,7 +762,7 @@ function SweeperDialog() {
       g.end();
    };
    this.previewInfo = new Label(this);
-   this.previewInfo.text = " ";
+   this.previewInfo.text = "No scan yet.";
    this.previewInfo.textAlignment = TextAlign_Left | TextAlign_VertCenter;
    this.previewInfo.useRichText = true;
 
@@ -800,8 +803,9 @@ SweeperDialog.prototype.scan = function () {
    }
    this.results = [];
    this.tree.clear();
-   this.setBitmap(null, -1);
    this.scanning = true; this.stopRequested = false;
+   this.setBitmap(null, -1);
+   this.previewInfo.text = this.summaryText();
    this.scanButton.enabled = false; this.stopButton.enabled = true;
    console.show();
    console.abortEnabled = true;
@@ -843,6 +847,8 @@ SweeperDialog.prototype.scan = function () {
    if (stopped) console.warningln("Scan stopped by user after " + this.results.length + " of " + files.length + " frames");
    this.scanning = false;
    this.scanButton.enabled = true; this.stopButton.enabled = false;
+   var cur = this.tree.currentNode;
+   this.showPreview(cur ? cur.resultIndex : -1);
    this.progressLabel.text = format("%s%d frames scanned in %.0f s, %d above threshold %.1f, %d skipped as non-light.",
                                     stopped ? "Stopped. " : "", scanned, (Date.now() - t0) / 1000, flagged,
                                     this.threshold, skipped);
@@ -881,7 +887,8 @@ SweeperDialog.prototype.rebuildList = function () {
       if (order[k] == current) again = node;
    }
    for (var c2 = 0; c2 < 6; ++c2) this.tree.adjustColumnWidthToContents(c2);
-   if (again) this.tree.currentNode = again;
+   if (again) { this.tree.currentNode = again; this.showPreview(again.resultIndex); }
+   else this.showPreview(-1);
 };
 
 SweeperDialog.prototype.buildBitmap = function (r) {
@@ -907,9 +914,29 @@ SweeperDialog.prototype.setBitmap = function (bmp, index) {
    this.preview.update();
 };
 
+SweeperDialog.prototype.summaryText = function () {
+   // What the info line shows when no frame is selected: live counts.
+   var scanned = 0, above = 0, skipped = 0, errors = 0, done = 0;
+   for (var i = 0; i < this.results.length; ++i) {
+      var r = this.results[i];
+      if (r.status == "skipped") { ++skipped; continue; }
+      if (r.status == "error") { ++errors; continue; }
+      ++scanned;
+      if (r.score >= this.threshold) ++above;
+      if (r.status == "quarantined" || r.status == "erased") ++done;
+   }
+   if (!this.results.length) return this.scanning ? "Scanning..." : "No scan yet.";
+   var t = format("%d frame%s scanned, <b>%d above threshold %.1f</b>", scanned, scanned > 1 ? "s" : "", above, this.threshold);
+   if (skipped) t += format(", %d skipped as non-light", skipped);
+   if (errors) t += format(", %d in error", errors);
+   if (done) t += format(", %d quarantined or erased", done);
+   t += this.scanning ? " (scan in progress)" : ". Select a frame to see its trails.";
+   return t;
+};
+
 SweeperDialog.prototype.showPreview = function (index) {
    if (index < 0 || index >= this.results.length || !this.results[index].preview) {
-      this.setBitmap(null, -1); this.previewInfo.text = " "; return;
+      this.setBitmap(null, -1); this.previewInfo.text = this.summaryText(); return;
    }
    var r = this.results[index];
    if (this.bitmapIndex != index) this.setBitmap(this.buildBitmap(r), index);

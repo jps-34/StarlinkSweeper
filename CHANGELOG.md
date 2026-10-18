@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4 (2026-10-18)
+* The information line under the preview is reset when a new scan starts and shows live counts
+  (frames scanned, above threshold, skipped) whenever no frame is selected; the details of a
+  selected frame follow the list refreshes instead of lingering from a previous scan.
+
 ## 1.0.3 (2026-10-18)
 * Fixes 1.0.1, which stopped with an error right after the first frame (list refresh) and left
   the dialog frozen. 1.0.2 was a development build with the same fault and was never released.
