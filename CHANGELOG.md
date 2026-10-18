@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 (2026-10-18)
+* Installation hints for the Python modules per system (apt on Debian and Ubuntu, pip elsewhere,
+  or a virtual environment) in the dialog and the READMEs; wording only.
+
 ## 1.1.1 (2026-10-18)
 * The parallel scan no longer depends on capturing the scanner's standard output, which is not
   available in every PixInsight build: the Python version and the machine probe go through files,

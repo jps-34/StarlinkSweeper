@@ -4,12 +4,14 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.1
+ * StarlinkSweeper.js  v1.1.2
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.2: installation hints for the Python modules per system (apt, pip or a
+ *   virtual environment); wording only.
  * v1.1.1: the dialog no longer depends on capturing the scanner's standard
  *   output: Python version and machine probe go through files, scan progress
  *   through a progress file; the detection reports why each candidate failed.
@@ -71,7 +73,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.1";
+var VERSION = "1.1.2";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -829,9 +831,11 @@ function SweeperDialog() {
    this.externalCheck.text = "Parallel scan with Python";
    this.externalCheck.checked = readSetting("external", DataType_Boolean, false);
    this.externalCheck.toolTip = "<p>Delegate the scan to the command-line version (" + CLI_NAME + ", same algorithm, "
-      + "same scores), which analyses several frames at once. Needs Python 3 with numpy, scipy and astropy "
-      + "(<i>pip install numpy scipy astropy</i>). The review, quarantine and erase stay here.</p>"
-      + "<p>Unticked, the scan runs in PixInsight on a single core.</p>";
+      + "same scores), which analyses several frames at once. Needs Python 3 with numpy, scipy and astropy, "
+      + "installed once: <i>sudo apt install python3-numpy python3-scipy python3-astropy</i> on Debian or Ubuntu, "
+      + "<i>pip install numpy scipy astropy</i> elsewhere, or a virtual environment whose interpreter you give in "
+      + "the Python field. The review, quarantine and erase stay here.</p>"
+      + "<p>Unticked, or without Python, the scan runs in PixInsight on a single core.</p>";
    this.externalCheck.onCheck = function (checked) { if (checked) self.probeExternal(); self.updateScannerUi(); };
    this.pythonEdit = new Edit(this);
    this.pythonEdit.text = readSetting("pythonPath", DataType_String, "");
@@ -1030,14 +1034,16 @@ SweeperDialog.prototype.probeExternal = function () {
    processEvents();
    var py = findPython(this.pythonEdit.text.trim());
    if (!py) {
-      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path. ("
-         + findPython.lastError.substring(0, 300) + ")";
+      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path; "
+         + "meanwhile the built-in single-core scan is used. (" + findPython.lastError.substring(0, 300) + ")";
       console.warningln("StarlinkSweeper: Python not found: " + findPython.lastError);
       this.updateScannerUi(); return;
    }
    if (!py.deps) {
       this.ext.message = "<font color=\"#c03030\">Python " + py.version + " found, but numpy, scipy or astropy is missing.</font>"
-         + " Run: <i>" + py.prog + " -m pip install numpy scipy astropy</i>";
+         + " Install them once: <i>sudo apt install python3-numpy python3-scipy python3-astropy</i> on Debian or Ubuntu, "
+         + "<i>" + py.prog + " -m pip install numpy scipy astropy</i> elsewhere, or a virtual environment given in the Python field. "
+         + "Meanwhile the built-in single-core scan is used.";
       this.updateScannerUi(); return;
    }
    var cli = findCli(this.cliEdit.text.trim());

@@ -54,14 +54,22 @@ jamais modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignor�
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.1) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.1.2) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
 La version en ligne de commande, `python/starlinksweeper.py`, nécessite Python 3 avec `numpy`,
-`scipy` et `astropy` (`pip install numpy scipy astropy`). Elle traite plusieurs brutes en
-parallèle, et le script PixInsight peut lui déléguer son scan (voir *Scan parallèle*) : le moteur
-JavaScript de PixInsight est mono-thread, c'est ainsi qu'un gros lot profite de tous les cœurs.
+`scipy` et `astropy`, à installer une fois :
+
+* Debian, Ubuntu et dérivés : `sudo apt install python3-numpy python3-scipy python3-astropy`
+  (pip refuse d'écrire dans le Python système) ;
+* Windows, macOS, autres Linux : `pip install numpy scipy astropy` (ou `py -3 -m pip ...`) ;
+* ou un environnement virtuel : `python3 -m venv <dossier> && <dossier>/bin/pip install numpy scipy astropy`,
+  puis indiquer `<dossier>/bin/python` dans le champ *Python* de la fenêtre.
+
+Elle traite plusieurs brutes en parallèle, et le script PixInsight peut lui déléguer son scan (voir
+*Scan parallèle*) : le moteur JavaScript de PixInsight est mono-thread, c'est ainsi qu'un gros lot
+profite de tous les cœurs. **Sans Python, le script fonctionne quand même**, sur un cœur.
 
 ## Installation
 

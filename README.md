@@ -49,14 +49,22 @@ frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.1) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.1.2) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
 The command-line version, `python/starlinksweeper.py`, needs Python 3 with `numpy`, `scipy` and
-`astropy` (`pip install numpy scipy astropy`). It runs several frames in parallel, and the
-PixInsight script can delegate its scan to it (see *Parallel scan* below): the PixInsight
-JavaScript engine is single-threaded, so this is how a large batch gets all the cores.
+`astropy`, installed once:
+
+* Debian, Ubuntu and derivatives: `sudo apt install python3-numpy python3-scipy python3-astropy`
+  (pip refuses to write into the system Python there);
+* Windows, macOS, other Linux: `pip install numpy scipy astropy` (or `py -3 -m pip ...`);
+* or a virtual environment: `python3 -m venv <folder> && <folder>/bin/pip install numpy scipy astropy`,
+  then give `<folder>/bin/python` in the *Python* field of the dialog.
+
+It runs several frames in parallel, and the PixInsight script can delegate its scan to it (see
+*Parallel scan* below): the PixInsight JavaScript engine is single-threaded, so this is how a large
+batch gets all the cores. **Without Python the script still works**, on one core.
 
 ## Installation
 
