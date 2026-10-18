@@ -52,7 +52,7 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.3) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.1.4) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -125,7 +125,8 @@ Without Python, or unticked, the scan runs in PixInsight on one core, one frame 
 Frames and lines are listed from a fixed score of 20 up. The score is a significance in units of
 the frame's own noise (see *How it works*), so this level does not depend on exposure, gain or
 camera: clean frames stay far below it, a visible trail lands several times above it. Red level,
-scanner options, workers and the last folder are remembered from one session to the next.
+scanner options, workers and the last folder are remembered from one session to the next; the
+**Reset** button (bottom left, PixInsight style) forgets them all and restores the defaults.
 
 Whatever the level, look at the preview before erasing.
 

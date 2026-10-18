@@ -57,7 +57,7 @@ scannés.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.3) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.1.4) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -135,7 +135,8 @@ Brutes et lignes sont listées à partir d'un score fixe de 20. Le score est une
 unités du bruit de la brute elle-même (voir *Comment ça marche*), donc ce niveau ne dépend ni du
 temps de pose, ni du gain, ni de la caméra : une brute propre reste loin dessous, une traînée
 visible arrive plusieurs fois au-dessus. Niveau rouge, options du scanner, workers et dernier
-dossier sont mémorisés d'une session à l'autre.
+dossier sont mémorisés d'une session à l'autre ; le bouton **Reset** (en bas à gauche, à la manière
+de PixInsight) les oublie tous et rétablit les valeurs par défaut.
 
 Quel que soit le niveau, regarder l'aperçu avant d'effacer.
 

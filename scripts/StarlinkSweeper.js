@@ -5,12 +5,15 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.3
+ * StarlinkSweeper.js  v1.1.4
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.4: Reset button (PixInsight style, bottom left) that forgets every
+ *   remembered setting; the scanner status shows the path of the command-line
+ *   script in use and warns when its version differs from the script's.
  * v1.1.3: the quarantine folder is created NEXT TO the scanned folder
  *   (<folder>_trails, same sub-folders inside) instead of inside it, so that a
  *   stacking program importing the scanned folder never sees the quarantined
@@ -79,7 +82,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.3";
+var VERSION = "1.1.4";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -775,6 +778,13 @@ function writeSetting(key, type, value) {
    try { Settings.write(SETTINGS_KEY + "/" + key, type, value); } catch (e) { /* settings are a convenience */ }
 }
 
+var SETTING_KEYS = ["alert", "folder", "recursive", "lightsOnly", "external", "pythonPath", "cliPath", "workers"];
+
+function removeSettings() {
+   for (var i = 0; i < SETTING_KEYS.length; ++i)
+      try { Settings.remove(SETTINGS_KEY + "/" + SETTING_KEYS[i]); } catch (e) { }
+}
+
 // ------------------------------------------------------------------- dialog
 function SweeperDialog() {
    this.__base__ = Dialog;
@@ -995,9 +1005,17 @@ function SweeperDialog() {
    this.closeButton = new PushButton(this);
    this.closeButton.text = "Close";
    this.closeButton.onClick = function () { self.saveSettings(); self.ok(); };
+   this.resetButton = new ToolButton(this);
+   this.resetButton.icon = this.scaledResource(":/process-interface/reset.png");
+   this.resetButton.setScaledFixedSize(24, 24);
+   this.resetButton.toolTip = "<p>Reset: put every setting back to its default and forget the remembered ones "
+      + "(red level, options, Python and script paths, workers, last folder). The results of the current scan are kept.</p>";
+   this.resetButton.onClick = function () { self.resetSettings(); };
 
    var actionSizer = new HorizontalSizer;
    actionSizer.spacing = 6;
+   actionSizer.add(this.resetButton);
+   actionSizer.addSpacing(4);
    actionSizer.add(this.quarantineButton);
    actionSizer.add(this.quarantineAllButton);
    actionSizer.add(this.quarantineRedButton);
@@ -1119,7 +1137,12 @@ SweeperDialog.prototype.probeExternal = function () {
    this.ext.message = format("Python %s, %s %s. This machine allows up to <b>%d</b> workers (%d CPU threads, %s available), suggested %d.",
                              py.version, CLI_NAME, info.version, this.ext.maxWorkers, info.cpus | 0,
                              info.available_gb != null ? format("%.1f GB", info.available_gb) : "memory unknown",
-                             this.ext.suggested);
+                             this.ext.suggested)
+      + "<br>Using " + cli;
+   if (String(info.version) != VERSION)
+      this.ext.message += "<br><font color=\"#c03030\"><b>Version mismatch:</b> this script is " + VERSION + ", that "
+         + CLI_NAME + " is " + info.version + ". Clear the Script field to use the copy installed with this script, "
+         + "or update the one you point to.</font>";
    this.updateScannerUi();
 };
 
@@ -1307,6 +1330,25 @@ SweeperDialog.prototype.saveSettings = function () {
    writeSetting("cliPath", DataType_String, this.cliEdit.text.trim());
    writeSetting("workers", DataType_Int32, this.workers);
    if (this.folder.length) writeSetting("folder", DataType_String, this.folder);
+};
+
+SweeperDialog.prototype.resetSettings = function () {
+   removeSettings();
+   this.alert = DEFAULT_ALERT;
+   this.alertControl.setValue(this.alert);
+   this.recursiveCheck.checked = true;
+   this.lightsOnlyCheck.checked = true;
+   this.externalCheck.checked = false;
+   this.pythonEdit.text = "";
+   this.cliEdit.text = "";
+   this.workers = 0;
+   this.ext = { python: null, cli: "", maxWorkers: 1, suggested: 1, ready: false, message: "not checked yet" };
+   this.workersControl.setRange(1, 64);
+   this.workersControl.slider.setRange(1, 64);
+   this.workersControl.setValue(1);
+   this.updateScannerUi();
+   this.rebuildList();
+   console.writeln(TITLE + ": settings reset to defaults.");
 };
 
 SweeperDialog.prototype.rebuildList = function () {

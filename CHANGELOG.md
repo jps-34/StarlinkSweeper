@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.4 (2026-10-18)
+* **Reset** button, PixInsight style at the bottom left: forgets every remembered setting (red
+  level, options, Python and script paths, workers, last folder) and restores the defaults.
+* The scanner status shows the path of the command-line script in use and warns in red when its
+  version differs from the script's (typically a copy left over from a test).
+
 ## 1.1.3 (2026-10-18)
 * The quarantine folder is now created **next to** the scanned folder (`<folder>_trails`, same
   sub-folders inside) instead of inside it, so that a stacking program importing the scanned folder
