@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xri version="1.0">
+   <description>
+      <p>StarlinkSweeper: finds the light frames crossed by satellite trails.</p>
+      <p>Add https://jps-34.github.io/StarlinkSweeper/ under Resources &gt; Updates &gt; Manage Repositories.</p>
+   </description>
+   <platform os="all" arch="noarch" version="1.9.4:1.9.99">
+      <package fileName="StarlinkSweeper-1.0.0-PI194.zip" sha1="120a93e5b3bb7e58437fb49e0ea6580cae97b03e" type="script" releaseDate="20261018" serverURL="https://jps-34.github.io/StarlinkSweeper/">
+         <title>StarlinkSweeper 1.0.0 (PixInsight 1.9.4 and later)</title>
+         <description>
+            <p>Scans a folder tree of light frames (FITS / XISF) for satellite, Starlink train and aircraft trails, lists the affected frames with a score, shows each detection on a preview, and lets you quarantine (move to a _trails sub-folder) or erase them one by one with confirmation. Installs under Script &gt; Utilities &gt; StarlinkSweeper.</p>
+            <p>Copyright (c) 2026 Jacques Pouyaud. MIT License. Source: https://github.com/jps-34/StarlinkSweeper</p>
+         </description>
+      </package>
+   </platform>
+</xri>
