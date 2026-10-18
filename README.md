@@ -49,12 +49,14 @@ frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.6) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.1.0) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
 The command-line version, `python/starlinksweeper.py`, needs Python 3 with `numpy`, `scipy` and
-`astropy`.
+`astropy` (`pip install numpy scipy astropy`). It runs several frames in parallel, and the
+PixInsight script can delegate its scan to it (see *Parallel scan* below): the PixInsight
+JavaScript engine is single-threaded, so this is how a large batch gets all the cores.
 
 ## Installation
 
@@ -86,6 +88,18 @@ Run it before integration, on the raw or calibrated lights. If a master already 
 straight band after stretching, scan the subs that went into it: the contaminated one stands out
 far above the others.
 
+## Parallel scan
+
+The *Scanner* box of the dialog offers **Parallel scan with Python**. When it is ticked, the scan is
+run by the bundled command-line version (installed next to the script, same algorithm, same scores)
+with several frames at once, and the results stream into the list as they come; the review,
+preview, quarantine and erase stay in the dialog. It needs Python 3 with `numpy`, `scipy` and
+`astropy`; the box says what it found, and **Detect** checks again after an installation.
+
+The **Workers** slider goes up to what the machine allows: its CPU threads, capped by the available
+memory (about 100 MB plus 5 bytes per pixel per worker). The suggested value leaves one thread free.
+Without Python, or unticked, the scan runs in PixInsight on one core, one frame at a time.
+
 ## Settings
 
 | Setting | Meaning |
@@ -94,11 +108,12 @@ far above the others.
 | **Include sub-folders** | Recursive scan (on by default). Folders named `_trails` are skipped. |
 | **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
 | **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the listing level and this value deserve a look at the preview. Changing it re-colours the list without re-scanning. |
+| **Parallel scan with Python**, **Python**, **Script**, **Workers** | See *Parallel scan*. Python and script paths can be left empty (searched in the PATH and next to the installed script). |
 
 Frames and lines are listed from a fixed score of 20 up. The score is a significance in units of
 the frame's own noise (see *How it works*), so this level does not depend on exposure, gain or
 camera: clean frames stay far below it, a visible trail lands several times above it. Red level,
-options and the last folder are remembered from one session to the next.
+scanner options, workers and the last folder are remembered from one session to the next.
 
 Whatever the level, look at the preview before erasing.
 
@@ -111,7 +126,7 @@ python3 python/starlinksweeper.py /path/to/lights -r --move /path/to/lights/_tra
 python3 python/starlinksweeper.py /path/to/lights -t 15 -j 4 -o report.csv --list flagged.txt
 ```
 
-Options: `-r` recursive, `-t` score from which a frame is flagged (default 20, the listing level of the script), `-j` parallel processes (default cpu-1),
+Options: `-r` recursive, `-t` score from which a frame is flagged (default 20, the listing level of the script), `-j` parallel processes (default `auto`: one core is left free and the count is capped by the available memory, about 100 MB plus 5 bytes per pixel per worker; the chosen count and the reason are printed),
 `-o` CSV path, `--preview DIR` (PNG for flagged frames, `--preview-all` for every frame),
 `--move DIR` (move flagged frames, never deletes), `--list FILE` (flagged file names, one per
 line, handy to deselect them in your stacking software), `--all-types` (also scan flats, darks and

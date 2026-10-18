@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 (2026-10-18)
+* **Parallel scan**: the dialog can delegate the scan to the bundled command-line version
+  (`starlinksweeper.py`, installed next to the script, same algorithm and scores), which analyses
+  several frames at once. *Scanner* box with the option, the Python and script paths, a **Workers**
+  slider bounded by what the machine allows (CPU threads, capped by the available memory) and a
+  **Detect** button. Results stream into the list; previews are built on demand. Needs Python 3 with
+  numpy, scipy and astropy; otherwise the built-in single-core scan is used.
+* Command line: `-j auto` (default) fits the number of workers to the machine, `--probe` reports
+  the machine capacity as JSON, `--json-lines` streams one record per frame; the CSV gains the
+  frame size and the extent of each line. Frames are no longer converted to float before binning,
+  which cuts the memory of each worker by about a third.
+* Script: the window can be made narrower (wrapping labels, shortened file names, smaller minimum
+  sizes). *Verbose log* option removed.
+
 ## 1.0.6 (2026-10-18)
 * One adjustable level only, **Red above**. Frames and lines are listed from a fixed score of 20
   up; the former threshold slider is gone. Weaker candidates, kept internally, are no longer drawn

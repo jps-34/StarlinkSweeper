@@ -33,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.0.6"
+VERSION = "1.1.0"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -112,7 +112,7 @@ def read_xisf(path):
     if loc[0] != "attachment":
         raise ValueError("only attached XISF data blocks are supported")
     data = np.fromfile(path, dtype=fmt, count=w * h, offset=int(loc[1]))
-    return data.reshape(h, w).astype(np.float32)
+    return data.reshape(h, w)                      # native dtype: the binning does the conversion
 
 
 def read_fits(path):
@@ -123,7 +123,7 @@ def read_fits(path):
                 d = hdu.data
                 if d.ndim == 3:
                     d = d[0]
-                return np.asarray(d, dtype=np.float32)
+                return d                            # native dtype: the binning does the conversion
     raise ValueError("no 2-D image HDU")
 
 
@@ -131,11 +131,113 @@ def read_image(path):
     return read_xisf(path) if path.lower().endswith(".xisf") else read_fits(path)
 
 
+def frame_pixels(path):
+    """Number of pixels of the first image, from the header only (0 if unknown)."""
+    try:
+        if path.lower().endswith(".xisf"):
+            m = re.search(r'<Image\b[^>]*geometry="(\d+):(\d+)', xisf_header(path))
+            return int(m.group(1)) * int(m.group(2)) if m else 0
+        from astropy.io import fits
+        with fits.open(path, memmap=True) as hdul:
+            for hdu in hdul:
+                h = hdu.header
+                if h.get("NAXIS", 0) >= 2:
+                    return int(h["NAXIS1"]) * int(h["NAXIS2"])
+    except Exception:
+        pass
+    return 0
+
+
+def available_memory():
+    """Available physical memory in bytes, or None when it cannot be determined."""
+    try:
+        import psutil
+        return psutil.virtual_memory().available
+    except Exception:
+        pass
+    try:
+        with open("/proc/meminfo") as f:                       # Linux
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except Exception:
+        pass
+    try:                                                       # Windows
+        import ctypes
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        st = MEMORYSTATUSEX(); st.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return int(st.ullAvailPhys)
+    except Exception:
+        pass
+    try:                                                       # macOS / other Unix
+        import subprocess
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
+        page = int(re.search(r"page size of (\d+)", out).group(1))
+        free = sum(int(re.search(r"%s:\s+(\d+)" % k, out).group(1)) for k in ("Pages free", "Pages inactive"))
+        return free * page
+    except Exception:
+        return None
+
+
+def probe(inputs):
+    """Machine capacity for a front-end: JSON on stdout."""
+    import json
+    sample = None
+    for p in inputs:
+        if os.path.isdir(p):
+            for root, _, names in os.walk(p):
+                for n in sorted(names):
+                    if n.lower().endswith(EXTS):
+                        sample = os.path.join(root, n)
+                        break
+                if sample:
+                    break
+        elif p.lower().endswith(EXTS) and os.path.exists(p):
+            sample = p
+        if sample:
+            break
+    cpus = os.cpu_count() or 1
+    px = frame_pixels(sample) if sample else 0
+    per_worker = 100e6 + 5.0 * (px or 60e6)
+    avail = available_memory()
+    by_mem = max(1, int(avail * 0.75 // per_worker)) if avail else cpus
+    suggested = max(1, min(max(1, cpus - 1), by_mem))
+    maximum = max(1, min(cpus, by_mem))
+    print(json.dumps({"version": VERSION, "cpus": cpus, "available_gb": round(avail / 1e9, 2) if avail else None,
+                      "frame_mpx": round((px or 0) / 1e6, 1), "per_worker_gb": round(per_worker / 1e9, 2),
+                      "suggested_workers": suggested, "max_workers": maximum}), flush=True)
+
+
+def auto_jobs(sample_path):
+    """Worker count fitted to the machine: one core left to the user, and the
+    available memory divided by the measured footprint of one worker (about
+    100 MB plus 5 bytes per pixel of the frame). Returns (jobs, explanation)."""
+    cpus = os.cpu_count() or 1
+    by_cpu = max(1, cpus - 1)
+    px = frame_pixels(sample_path)
+    per_worker = 100e6 + 5.0 * (px or 60e6)
+    avail = available_memory()
+    if avail is None:
+        return by_cpu, "%d workers (%d CPUs, memory unknown, ~%.1f GB per worker)" % (by_cpu, cpus, per_worker / 1e9)
+    by_mem = max(1, int(avail * 0.75 // per_worker))
+    jobs = max(1, min(by_cpu, by_mem))
+    limit = "CPU" if by_cpu <= by_mem else "memory"
+    return jobs, "%d workers (%d CPUs, %.1f GB available, ~%.2f GB per worker for %d Mpx frames, limited by %s)" % (
+        jobs, cpus, avail / 1e9, per_worker / 1e9, round((px or 60e6) / 1e6), limit)
+
+
 # ---------------------------------------------------------------------- analysis
 def bin_mean(a, b):
+    """Mean binning b x b, float32 result, no full-size float copy of the input."""
     h, w = a.shape
     a = a[: h // b * b, : w // b * b]
-    return a.reshape(h // b, b, w // b, b).mean(axis=(1, 3))
+    return a.reshape(h // b, b, w // b, b).mean(axis=(1, 3), dtype=np.float32)
 
 
 def robust_sigma(a):
@@ -399,8 +501,8 @@ def main():
     ap.add_argument("-r", "--recursive", action="store_true", help="scan sub-folders")
     ap.add_argument("-t", "--threshold", type=float, default=20.0,
                     help="continuity score (robust sigma) from which a frame is flagged [20, the listing level of the PixInsight script]")
-    ap.add_argument("-j", "--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1),
-                    help="parallel processes [cpu-1]")
+    ap.add_argument("-j", "--jobs", default="auto",
+                    help="parallel processes; 'auto' (default) fits the CPU count and the available memory")
     ap.add_argument("-o", "--csv", default="starlinksweeper_report.csv", help="CSV report path")
     ap.add_argument("--preview", metavar="DIR", help="PNG of each flagged frame with the lines drawn")
     ap.add_argument("--preview-all", action="store_true", help="PNG for every frame, not only flagged")
@@ -408,7 +510,14 @@ def main():
     ap.add_argument("--list", metavar="FILE", help="write flagged file names, one per line")
     ap.add_argument("--all-types", action="store_true",
                     help="scan every frame; by default flats, darks and bias (IMAGETYP header) are skipped")
+    ap.add_argument("--json-lines", action="store_true",
+                    help="also print one '#JSON {...}' line per frame, for front-ends")
+    ap.add_argument("--probe", action="store_true",
+                    help="print the machine capacity as JSON (cpus, memory, suggested and maximum workers) and exit")
     a = ap.parse_args()
+    if a.probe:
+        probe(a.inputs)
+        return
 
     files = []
     for p in a.inputs:
@@ -425,8 +534,14 @@ def main():
         sys.exit("no FITS/XISF files found")
     if a.preview:
         os.makedirs(a.preview, exist_ok=True)
+    if str(a.jobs).lower() in ("auto", "0"):
+        jobs, why = auto_jobs(files[0])
+    else:
+        jobs, why = max(1, int(a.jobs)), "%s workers (requested)" % a.jobs
+    a.jobs = jobs
 
-    print("StarlinkSweeper %s: %d frames, %d jobs, threshold %.1f" % (VERSION, len(files), a.jobs, a.threshold))
+    print("StarlinkSweeper %s: %d frames, threshold %.1f" % (VERSION, len(files), a.threshold), flush=True)
+    print("Workers: " + why, flush=True)
     jobs = [(f, a.threshold, a.preview, a.preview_all, not a.all_types) for f in files]
     results, t0 = [], time.time()
     with ProcessPoolExecutor(max_workers=a.jobs) as ex:
@@ -434,27 +549,40 @@ def main():
             results.append(res)
             name = os.path.basename(res["file"])
             if "error" in res:
-                print("[%d/%d] %s  ERROR %s" % (k, len(files), name, res["error"]))
+                print("[%d/%d] %s  ERROR %s" % (k, len(files), name, res["error"]), flush=True)
             elif "skipped" in res:
-                print("[%d/%d] %-58s skipped (%s)" % (k, len(files), name[:58], res["skipped"].upper()))
+                print("[%d/%d] %-58s skipped (%s)" % (k, len(files), name[:58], res["skipped"].upper()), flush=True)
             else:
                 tag = "TRAIL x%d" % res["n_lines"] if res["flagged"] else "ok"
                 print("[%d/%d] %-58s score %6.1f (peak %5.1f) %5.1fs  %s"
-                      % (k, len(files), name[:58], res["score"], res["coarse"], res["seconds"], tag))
+                      % (k, len(files), name[:58], res["score"], res["coarse"], res["seconds"], tag), flush=True)
+            if a.json_lines:
+                import json
+                if "error" in res:
+                    rec = {"file": res["file"], "status": "error", "error": res["error"]}
+                elif "skipped" in res:
+                    rec = {"file": res["file"], "status": "skipped", "skipped": res["skipped"]}
+                else:
+                    rec = {"file": res["file"], "status": "", "score": res["score"], "coarse": res["coarse"],
+                           "width": res["width"], "height": res["height"], "seconds": res["seconds"],
+                           "lines": [{"score": l["score"], "angle": l["angle"], "run": l["run"],
+                                      "x0": l["x0"], "y0": l["y0"], "x1": l["x1"], "y1": l["y1"]} for l in res["lines"]]}
+                print("#JSON " + json.dumps(rec), flush=True)
 
     with open(a.csv, "w", newline="") as f:
         wr = csv.writer(f)
-        wr.writerow(["file", "flagged", "score", "coarse_peak", "n_lines", "lines(score@angle:x0,y0-x1,y1)", "status"])
+        wr.writerow(["file", "flagged", "score", "coarse_peak", "n_lines", "width", "height",
+                     "lines(score@angle/segments:x0,y0-x1,y1)", "status"])
         for r in results:
             if "error" in r:
-                wr.writerow([r["file"], "", "", "", "", "", "error: " + r["error"]])
+                wr.writerow([r["file"], "", "", "", "", "", "", "", "error: " + r["error"]])
                 continue
             if "skipped" in r:
-                wr.writerow([r["file"], "", "", "", "", "", "skipped: " + r["skipped"]])
+                wr.writerow([r["file"], "", "", "", "", "", "", "", "skipped: " + r["skipped"]])
                 continue
-            desc = " | ".join("%.1f@%.2f:%d,%d-%d,%d" % (l["score"], l["angle"], l["x0"], l["y0"], l["x1"], l["y1"])
+            desc = " | ".join("%.1f@%.2f/%d:%d,%d-%d,%d" % (l["score"], l["angle"], l["run"], l["x0"], l["y0"], l["x1"], l["y1"])
                               for l in r["lines"])
-            wr.writerow([r["file"], int(r["flagged"]), r["score"], r["coarse"], r["n_lines"], desc, ""])
+            wr.writerow([r["file"], int(r["flagged"]), r["score"], r["coarse"], r["n_lines"], r["width"], r["height"], desc, ""])
 
     flagged = [r["file"] for r in results if r.get("flagged")]
     scores = [r["score"] for r in results if "score" in r]

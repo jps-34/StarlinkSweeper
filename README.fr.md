@@ -54,12 +54,14 @@ jamais modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignor�
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.6) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.1.0) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
 La version en ligne de commande, `python/starlinksweeper.py`, nécessite Python 3 avec `numpy`,
-`scipy` et `astropy`.
+`scipy` et `astropy` (`pip install numpy scipy astropy`). Elle traite plusieurs brutes en
+parallèle, et le script PixInsight peut lui déléguer son scan (voir *Scan parallèle*) : le moteur
+JavaScript de PixInsight est mono-thread, c'est ainsi qu'un gros lot profite de tous les cœurs.
 
 ## Installation
 
@@ -93,6 +95,20 @@ menu *Script > Utilities*.
 rectiligne faible après étirement, scanner les brutes qui l'ont produit : la brute contaminée
 ressort loin au-dessus des autres.
 
+## Scan parallèle
+
+Le cadre *Scanner* de la fenêtre propose **Parallel scan with Python**. Coché, le scan est confié à
+la version en ligne de commande livrée avec le script (installée à côté, même algorithme, mêmes
+scores), qui traite plusieurs brutes à la fois ; les résultats arrivent dans la liste au fil de
+l'eau, et la vérification, l'aperçu, la quarantaine et l'effacement restent dans la fenêtre. Il faut
+Python 3 avec `numpy`, `scipy` et `astropy` ; le cadre indique ce qu'il a trouvé, et **Detect**
+revérifie après une installation.
+
+Le curseur **Workers** monte jusqu'à ce que la machine autorise : ses threads CPU, plafonnés par la
+mémoire disponible (environ 100 Mo plus 5 octets par pixel et par worker). La valeur suggérée
+laisse un thread libre. Sans Python, ou décoché, le scan tourne dans PixInsight sur un cœur, une
+brute à la fois.
+
 ## Réglages
 
 | Réglage | Signification |
@@ -101,12 +117,13 @@ ressort loin au-dessus des autres.
 | **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers nommés `_trails` sont ignorés. |
 | **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
 | **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le niveau de liste et cette valeur méritent un coup d'œil à l'aperçu. Le changer recolore la liste sans relancer le scan. |
+| **Parallel scan with Python**, **Python**, **Script**, **Workers** | Voir *Scan parallèle*. Les chemins de Python et du script peuvent rester vides (recherche dans le PATH et à côté du script installé). |
 
 Brutes et lignes sont listées à partir d'un score fixe de 20. Le score est une significativité en
 unités du bruit de la brute elle-même (voir *Comment ça marche*), donc ce niveau ne dépend ni du
 temps de pose, ni du gain, ni de la caméra : une brute propre reste loin dessous, une traînée
-visible arrive plusieurs fois au-dessus. Niveau rouge, options et dernier dossier sont mémorisés
-d'une session à l'autre.
+visible arrive plusieurs fois au-dessus. Niveau rouge, options du scanner, workers et dernier
+dossier sont mémorisés d'une session à l'autre.
 
 Quel que soit le niveau, regarder l'aperçu avant d'effacer.
 
@@ -120,7 +137,7 @@ python3 python/starlinksweeper.py /chemin/brutes -t 15 -j 4 -o rapport.csv --lis
 ```
 
 Options : `-r` récursif, `-t` score à partir duquel une brute est signalée (20 par défaut, le niveau de liste du script), `-j` processus
-parallèles (cpu-1 par défaut), `-o` chemin du CSV, `--preview DIR` (PNG des brutes signalées,
+parallèles (`auto` par défaut : un cœur est laissé libre et le nombre est plafonné par la mémoire disponible, environ 100 Mo plus 5 octets par pixel et par processus ; le nombre retenu et la raison sont affichés), `-o` chemin du CSV, `--preview DIR` (PNG des brutes signalées,
 `--preview-all` pour toutes), `--move DIR` (déplace les brutes signalées, ne supprime jamais),
 `--list FICHIER` (noms des brutes signalées, un par ligne, pratique pour les décocher dans le
 logiciel d'empilement), `--all-types` (scanner aussi les flats, darks et bias, ignorés par défaut

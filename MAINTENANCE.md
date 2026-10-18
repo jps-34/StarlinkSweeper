@@ -7,7 +7,7 @@ Notes for the author. Nothing here is needed to use the script.
 | Path | Role |
 |---|---|
 | `scripts/StarlinkSweeper.js` | the PixInsight script, **only source to edit** for the script |
-| `python/starlinksweeper.py` | command-line version, same algorithm and constants as the script |
+| `python/starlinksweeper.py` | command-line version, same algorithm and constants as the script; packed into the update archive next to the script, where the dialog finds it for the parallel scan |
 | `tests/make_synthetic_subs.py` | generates the synthetic validation frames (a few GB, a few minutes) |
 | `tools/build_repo.py` | builds the PixInsight update repository into `docs/` |
 | `docs/` | served by GitHub Pages: `index.html`, `updates.xri`, the script archive, `.nojekyll` |

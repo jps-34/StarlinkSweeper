@@ -4,12 +4,19 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.6
+ * StarlinkSweeper.js  v1.1.0
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.1.0: parallel scan through the command-line version (starlinksweeper.py,
+ *   installed with this script) when Python 3 with numpy, scipy and astropy is
+ *   available: "Parallel scan with Python" option, Workers slider bounded by
+ *   what the machine allows, results streamed into the list, previews built on
+ *   demand. Built-in single-core scan otherwise.
+ * v1.0.7: the window can be made narrower (wrapping labels, shortened file
+ *   names, smaller minimum sizes); "Verbose log" option removed.
  * v1.0.6: one adjustable level only, "Red above". Frames and lines are listed
  *   from a fixed score of 20 up; weaker candidates are no longer drawn.
  * v1.0.5: "Red above" level: frames at or above it are shown in red and can be
@@ -61,7 +68,7 @@
 #include <pjsr/DataType.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.6";
+var VERSION = "1.1.0";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -497,7 +504,7 @@ function frameTypeFromKeywords(keywords) {
    return null;
 }
 
-var verboseLog = false;      // set by the dialog: one console line per stage of each frame
+var verboseLog = false;      // one console line per stage of each frame (maintenance aid)
 
 function stage(msg) {
    if (verboseLog) { console.writeln("<end><cbr>    " + msg); console.flush(); }
@@ -600,6 +607,84 @@ function moveFile(src, dst) {
 
 function csvEscape(s) { return '"' + String(s).replace(/"/g, '""') + '"'; }
 
+function shortName(path, maxLength) {
+   // File name shortened in the middle so that labels never force the window width.
+   var n = File.extractNameAndExtension(path);
+   if (n.length <= maxLength) return n;
+   var keep = Math.floor((maxLength - 3) / 2);
+   return n.substring(0, keep) + "..." + n.substring(n.length - keep);
+}
+
+// ------------------------------------------------- external scanner (Python)
+// The PixInsight JavaScript engine is single-threaded. The command-line
+// version (starlinksweeper.py, same algorithm) runs several frames at once,
+// so the dialog can delegate the scan to it and keep the review here.
+var CLI_NAME = "starlinksweeper.py";
+
+function byteArrayToString(ba) {
+   if (ba == null) return "";
+   if (typeof ba == "string") return ba;
+   try { return ba.utf8ToString(); } catch (e) { }
+   try { return ba.toString(); } catch (e2) { }
+   return "";
+}
+
+function runCapture(program, args, timeoutMs) {
+   // Runs a program to completion; returns {ok, code, out, err}; never throws.
+   var r = { ok: false, code: -1, out: "", err: "" };
+   try {
+      var p = new ExternalProcess;
+      p.start(program, args);
+      if (!p.waitForStarted(5000)) { r.err = "could not start " + program; return r; }
+      if (!p.waitForFinished(timeoutMs)) { try { p.kill(); } catch (e) { } r.err = "timeout"; return r; }
+      r.out = byteArrayToString(p.readStandardOutput());
+      r.err = byteArrayToString(p.readStandardError());
+      r.code = p.exitCode;
+      r.ok = (r.code == 0);
+   } catch (e) { r.err = e.message; }
+   return r;
+}
+
+function findPython(preferred) {
+   // {prog, pre, version, deps} for the first interpreter that runs; deps tells
+   // whether numpy, scipy and astropy import. null when no Python runs at all.
+   var cands = [];
+   if (preferred && preferred.length) cands.push({ prog: preferred, pre: [] });
+   cands.push({ prog: "python3", pre: [] }, { prog: "python", pre: [] }, { prog: "py", pre: ["-3"] });
+   var found = null;
+   for (var i = 0; i < cands.length; ++i) {
+      var c = cands[i];
+      var r = runCapture(c.prog, c.pre.concat(["-c", "import sys; print(sys.version.split()[0])"]), 20000);
+      if (!r.ok) continue;
+      var d = runCapture(c.prog, c.pre.concat(["-c", "import numpy, scipy, astropy"]), 60000);
+      var hit = { prog: c.prog, pre: c.pre, version: r.out.trim(), deps: d.ok };
+      if (d.ok) return hit;
+      if (!found) found = hit;
+   }
+   return found;
+}
+
+function findCli(preferred) {
+   // The command-line script: a path given by the user, or next to the
+   // installed script under <PixInsight>/src/scripts/StarlinkSweeper/.
+   if (preferred && preferred.length && File.exists(preferred)) return preferred;
+   var roots = [];
+   try { roots.push(CoreApplication.dirPath); } catch (e) { }
+   try { roots.push(File.extractDirectory(CoreApplication.filePath)); } catch (e2) { }
+   var ups = ["", "/..", "/../..", "/../../.."];
+   for (var i = 0; i < roots.length; ++i)
+      for (var k = 0; k < ups.length; ++k) {
+         var cand = roots[i] + ups[k] + "/src/scripts/StarlinkSweeper/" + CLI_NAME;
+         try { if (File.exists(cand)) return File.fullPath(cand); } catch (e3) { }
+      }
+   return "";
+}
+
+function pause(seconds) {
+   if (typeof sleep == "function") sleep(seconds);
+   else if (typeof msleep == "function") msleep(Math.round(seconds * 1000));
+}
+
 function readSetting(key, type, fallback) {
    var v = Settings.read(SETTINGS_KEY + "/" + key, type);
    return Settings.lastReadOK ? v : fallback;
@@ -620,6 +705,8 @@ function SweeperDialog() {
    this.alert = readSetting("alert", DataType_Double, DEFAULT_ALERT);
    this.folder = readSetting("folder", DataType_String, "");
    if (this.folder.length && !File.directoryExists(this.folder)) this.folder = "";
+   this.ext = { python: null, cli: "", maxWorkers: 1, suggested: 1, ready: false, message: "not checked yet" };
+   this.workers = readSetting("workers", DataType_Int32, 0);          // 0 = suggested
    this.stopRequested = false;
    this.scanning = false;
    this.bitmap = null;         // preview of the current frame
@@ -636,6 +723,7 @@ function SweeperDialog() {
    this.folderEdit.readOnly = true;
    this.folderEdit.text = this.folder;
    this.folderEdit.toolTip = "Root folder of the light frames to scan (FITS / XISF).";
+   this.folderEdit.setMinWidth(this.logicalPixelsToPhysical(200));
    this.folderButton = new ToolButton(this);
    this.folderButton.icon = this.scaledResource(":/icons/select-file.png");
    this.folderButton.setScaledFixedSize(20, 20);
@@ -654,11 +742,6 @@ function SweeperDialog() {
    this.lightsOnlyCheck.checked = readSetting("lightsOnly", DataType_Boolean, true);
    this.lightsOnlyCheck.toolTip = "<p>Skip the frames whose header (IMAGETYP, FRAME or FRAMETYP) says flat, dark "
       + "or bias, so a whole night's folder can be scanned. Frames without the keyword are scanned.</p>";
-   this.verboseCheck = new CheckBox(this);
-   this.verboseCheck.text = "Verbose log";
-   this.verboseCheck.checked = false;
-   this.verboseCheck.toolTip = "<p>Write one console line per stage of each frame (open, header, read, bin, "
-      + "analyse). Useful to report a problem: the last line printed tells where the scan stopped.</p>";
 
    var folderSizer = new HorizontalSizer;
    folderSizer.spacing = 4;
@@ -669,8 +752,6 @@ function SweeperDialog() {
    folderSizer.add(this.recursiveCheck);
    folderSizer.addSpacing(8);
    folderSizer.add(this.lightsOnlyCheck);
-   folderSizer.addSpacing(8);
-   folderSizer.add(this.verboseCheck);
 
    // ---- red level + scan
    this.alertControl = new NumericControl(this);
@@ -705,9 +786,79 @@ function SweeperDialog() {
    scanSizer.add(this.scanButton);
    scanSizer.add(this.stopButton);
 
+   // ---- scanner (built-in single core, or the parallel Python command line)
+   this.externalCheck = new CheckBox(this);
+   this.externalCheck.text = "Parallel scan with Python";
+   this.externalCheck.checked = readSetting("external", DataType_Boolean, false);
+   this.externalCheck.toolTip = "<p>Delegate the scan to the command-line version (" + CLI_NAME + ", same algorithm, "
+      + "same scores), which analyses several frames at once. Needs Python 3 with numpy, scipy and astropy "
+      + "(<i>pip install numpy scipy astropy</i>). The review, quarantine and erase stay here.</p>"
+      + "<p>Unticked, the scan runs in PixInsight on a single core.</p>";
+   this.externalCheck.onCheck = function (checked) { if (checked) self.probeExternal(); self.updateScannerUi(); };
+   this.pythonEdit = new Edit(this);
+   this.pythonEdit.text = readSetting("pythonPath", DataType_String, "");
+   this.pythonEdit.toolTip = "<p>Python interpreter: leave empty to search python3, python and py in the PATH, "
+      + "or give the full path of the interpreter to use.</p>";
+   this.pythonEdit.setMinWidth(this.logicalPixelsToPhysical(120));
+   this.pythonEdit.onEditCompleted = function () { self.probeExternal(); };
+   this.cliEdit = new Edit(this);
+   this.cliEdit.text = readSetting("cliPath", DataType_String, "");
+   this.cliEdit.toolTip = "<p>Path of " + CLI_NAME + ". Leave empty to use the copy installed with this script.</p>";
+   this.cliEdit.setMinWidth(this.logicalPixelsToPhysical(120));
+   this.cliEdit.onEditCompleted = function () { self.probeExternal(); };
+   this.cliButton = new ToolButton(this);
+   this.cliButton.icon = this.scaledResource(":/icons/select-file.png");
+   this.cliButton.setScaledFixedSize(20, 20);
+   this.cliButton.toolTip = "Locate " + CLI_NAME;
+   this.cliButton.onClick = function () {
+      var ofd = new OpenFileDialog;
+      ofd.caption = "StarlinkSweeper: locate " + CLI_NAME;
+      ofd.filters = [["Python scripts", "*.py"]];
+      if (ofd.execute()) { self.cliEdit.text = ofd.fileName; self.probeExternal(); }
+   };
+   this.workersControl = new NumericControl(this);
+   this.workersControl.label.text = "Workers:";
+   this.workersControl.setRange(1, 64);
+   this.workersControl.slider.setRange(1, 64);
+   this.workersControl.setPrecision(0);
+   this.workersControl.setValue(1);
+   this.workersControl.toolTip = "<p>Frames analysed at the same time. The maximum is what this machine allows: "
+      + "its CPU threads, capped by the available memory (about 100 MB plus 5 bytes per pixel per worker). "
+      + "The suggested value leaves one thread free.</p>";
+   this.workersControl.onValueUpdated = function (v) { self.workers = Math.round(v); };
+   this.detectButton = new PushButton(this);
+   this.detectButton.text = "Detect";
+   this.detectButton.toolTip = "<p>Check Python and its modules again, and measure what this machine allows.</p>";
+   this.detectButton.onClick = function () { self.probeExternal(); };
+   this.scannerStatus = new Label(this);
+   this.scannerStatus.text = " ";
+   this.scannerStatus.wordWrapping = true;
+   this.scannerStatus.useRichText = true;
+
+   var pyRow = new HorizontalSizer;
+   pyRow.spacing = 4;
+   var pyLabel = new Label(this); pyLabel.text = "Python:"; pyLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   var cliLabel = new Label(this); cliLabel.text = "Script:"; cliLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   pyRow.add(pyLabel); pyRow.add(this.pythonEdit, 40); pyRow.addSpacing(8);
+   pyRow.add(cliLabel); pyRow.add(this.cliEdit, 60); pyRow.add(this.cliButton);
+   var wkRow = new HorizontalSizer;
+   wkRow.spacing = 6;
+   wkRow.add(this.workersControl, 100);
+   wkRow.add(this.detectButton);
+   this.scannerBox = new GroupBox(this);
+   this.scannerBox.title = "Scanner";
+   this.scannerBox.sizer = new VerticalSizer;
+   this.scannerBox.sizer.margin = 6;
+   this.scannerBox.sizer.spacing = 4;
+   this.scannerBox.sizer.add(this.externalCheck);
+   this.scannerBox.sizer.add(pyRow);
+   this.scannerBox.sizer.add(wkRow);
+   this.scannerBox.sizer.add(this.scannerStatus);
+
    this.progressLabel = new Label(this);
    this.progressLabel.text = "Select a folder and press Scan.";
    this.progressLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   this.progressLabel.wordWrapping = true;
 
    // ---- results list
    this.tree = new TreeBox(this);
@@ -721,7 +872,7 @@ function SweeperDialog() {
    this.tree.rootDecoration = false;
    this.tree.alternateRowColor = true;
    this.tree.multipleSelection = false;
-   this.tree.setMinSize(this.logicalPixelsToPhysical(520), this.logicalPixelsToPhysical(260));
+   this.tree.setMinSize(this.logicalPixelsToPhysical(420), this.logicalPixelsToPhysical(200));
    this.tree.toolTip = "<p>Frames whose best trail scores " + format("%.0f", LIST_THRESHOLD) + " or more, strongest first; "
       + "in red from the <i>Red above</i> level. Click a frame to see the detected trail on the preview.</p>";
    this.tree.onCurrentNodeUpdated = function (node) { self.showPreview(node ? node.resultIndex : -1); };
@@ -773,7 +924,7 @@ function SweeperDialog() {
 
    // ---- preview
    this.preview = new Control(this);
-   this.preview.setMinSize(this.logicalPixelsToPhysical(720), this.logicalPixelsToPhysical(480));
+   this.preview.setMinSize(this.logicalPixelsToPhysical(480), this.logicalPixelsToPhysical(320));
    this.preview.toolTip = "<p>Binned, background-subtracted and stretched view of the selected frame. "
       + "The detected trails are drawn in red over their detected extent.</p>";
    this.preview.onPaint = function () {
@@ -796,12 +947,14 @@ function SweeperDialog() {
    this.previewInfo.text = "No scan yet.";
    this.previewInfo.textAlignment = TextAlign_Left | TextAlign_VertCenter;
    this.previewInfo.useRichText = true;
+   this.previewInfo.wordWrapping = true;
 
    // ---- layout
    var leftSizer = new VerticalSizer;
    leftSizer.spacing = 6;
    leftSizer.add(folderSizer);
    leftSizer.add(scanSizer);
+   leftSizer.add(this.scannerBox);
    leftSizer.add(this.progressLabel);
    leftSizer.add(this.tree, 100);
    leftSizer.add(actionSizer);
@@ -817,8 +970,156 @@ function SweeperDialog() {
    this.sizer.add(leftSizer, 45);
    this.sizer.add(rightSizer, 55);
    this.adjustToContents();
+   this.updateScannerUi();
+   if (this.externalCheck.checked) this.probeExternal();
 }
 SweeperDialog.prototype = new Dialog;
+
+SweeperDialog.prototype.updateScannerUi = function () {
+   var on = this.externalCheck.checked;
+   this.pythonEdit.enabled = on; this.cliEdit.enabled = on; this.cliButton.enabled = on;
+   this.detectButton.enabled = on;
+   this.workersControl.enabled = on && this.ext.ready;
+   if (!on) { this.scannerStatus.text = "Built-in scanner: one frame at a time, on one core."; return; }
+   this.scannerStatus.text = this.ext.message;
+};
+
+SweeperDialog.prototype.probeExternal = function () {
+   // Finds Python and the command-line script, then asks the latter what the
+   // machine allows (CPU threads, memory): sets the range of the Workers slider.
+   this.ext.ready = false;
+   this.scannerStatus.text = "Checking Python...";
+   processEvents();
+   var py = findPython(this.pythonEdit.text.trim());
+   if (!py) {
+      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path.";
+      this.updateScannerUi(); return;
+   }
+   if (!py.deps) {
+      this.ext.message = "<font color=\"#c03030\">Python " + py.version + " found, but numpy, scipy or astropy is missing.</font>"
+         + " Run: <i>" + py.prog + " -m pip install numpy scipy astropy</i>";
+      this.updateScannerUi(); return;
+   }
+   var cli = findCli(this.cliEdit.text.trim());
+   if (!cli.length) {
+      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " not found.</font> It is installed with this script "
+         + "under src/scripts/StarlinkSweeper/; otherwise locate it with the button.";
+      this.updateScannerUi(); return;
+   }
+   var args = py.pre.concat([cli, "--probe"]);
+   if (this.folder.length) args.push(this.folder);
+   var r = runCapture(py.prog, args, 60000);
+   var info = null;
+   try { info = JSON.parse(r.out.trim().split("\n").pop()); } catch (e) { info = null; }
+   if (!r.ok || !info) {
+      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " did not answer:</font> " + (r.err || r.out).trim().substring(0, 200);
+      this.updateScannerUi(); return;
+   }
+   this.ext.python = py; this.ext.cli = cli;
+   this.ext.maxWorkers = Math.max(1, info.max_workers | 0);
+   this.ext.suggested = Math.max(1, Math.min(info.suggested_workers | 0, this.ext.maxWorkers));
+   this.workersControl.setRange(1, this.ext.maxWorkers);
+   this.workersControl.slider.setRange(1, this.ext.maxWorkers);
+   if (this.workers < 1 || this.workers > this.ext.maxWorkers) this.workers = this.ext.suggested;
+   this.workersControl.setValue(this.workers);
+   this.ext.ready = true;
+   this.ext.message = format("Python %s, %s %s. This machine allows up to <b>%d</b> workers (%d CPU threads, %s available), suggested %d.",
+                             py.version, CLI_NAME, info.version, this.ext.maxWorkers, info.cpus | 0,
+                             info.available_gb != null ? format("%.1f GB", info.available_gb) : "memory unknown",
+                             this.ext.suggested);
+   this.updateScannerUi();
+};
+
+SweeperDialog.prototype.addExternalRecord = function (rec) {
+   // One '#JSON' line of the command-line scanner -> one result (preview built on demand).
+   var r = { file: rec.file, status: rec.status || "", lines: [], preview: null, score: -1, coarse: 0 };
+   if (r.status == "error") { r.error = rec.error || "error"; }
+   else if (r.status == "skipped") { r.skipped = rec.skipped || "other"; }
+   else {
+      r.score = Number(rec.score) || 0; r.coarse = Number(rec.coarse) || 0;
+      r.width = rec.width | 0; r.height = rec.height | 0; r.seconds = Number(rec.seconds) || 0;
+      for (var i = 0; i < (rec.lines || []).length; ++i) {
+         var L = rec.lines[i];
+         r.lines.push({ score: Number(L.score), angle: Number(L.angle), run: L.run | 0,
+                        x0: L.x0 | 0, y0: L.y0 | 0, x1: L.x1 | 0, y1: L.y1 | 0 });
+      }
+   }
+   this.results.push(r);
+   return r;
+};
+
+SweeperDialog.prototype.ensurePreview = function (r) {
+   // Results of the external scanner carry no preview: read and normalise the
+   // frame when it is first shown (no line search, well under a second).
+   if (r.preview || r.status == "skipped" || r.status == "error") return;
+   try {
+      var b = readBinnedImage(r.file, false);
+      var norm = normalise(b.data, b.w, b.h);
+      r.preview = norm.preview; r.pw = b.w; r.ph = b.h;
+      if (!r.width) { r.width = b.W; r.height = b.H; }
+   } catch (e) {
+      console.warningln("Preview of " + r.file + ": " + e.message);
+   }
+};
+
+SweeperDialog.prototype.scanExternal = function (files) {
+   var self = this, py = this.ext.python, t0 = Date.now();
+   var args = py.pre.concat(["-u", this.ext.cli, this.folder, "-t", format("%.1f", this.threshold),
+                             "-j", String(Math.max(1, this.workers)), "-o", File.systemTempDirectory + "/StarlinkSweeper_last.csv",
+                             "--json-lines"]);
+   if (this.recursiveCheck.checked) args.push("-r");
+   if (!this.lightsOnlyCheck.checked) args.push("--all-types");
+   console.writeln("Running " + py.prog + " " + args.join(" "));
+   var p = new ExternalProcess;
+   var counts = { done: 0, flagged: 0, skipped: 0, scanned: 0 }, stopped = false, buf = "";
+   var handleLine = function (line) {
+      line = line.replace(/\r$/, "");
+      if (!line.length) return;
+      if (line.indexOf("#JSON ") == 0) {
+         var rec = null;
+         try { rec = JSON.parse(line.substring(6)); } catch (e) { rec = null; }
+         if (!rec) return;
+         var r = self.addExternalRecord(rec);
+         ++counts.done;
+         if (r.status == "skipped") ++counts.skipped;
+         else if (r.status != "error") { ++counts.scanned; if (r.score >= self.threshold) ++counts.flagged; }
+         self.progressLabel.text = format("Scanning %d / %d  (%d listed, %d skipped)  %s", counts.done, files.length,
+                                          counts.flagged, counts.skipped, shortName(r.file, 48));
+         self.rebuildList();
+         return;
+      }
+      console.writeln(line);
+   };
+   try {
+      p.start(py.prog, args);
+      if (!p.waitForStarted(10000)) throw new Error("could not start " + py.prog);
+      while (p.isRunning) {
+         processEvents();
+         if (this.stopRequested || console.abortRequested) { stopped = true; try { p.kill(); } catch (e) { } break; }
+         var chunk = byteArrayToString(p.readStandardOutput());
+         if (chunk.length) {
+            buf += chunk;
+            var parts = buf.split("\n");
+            buf = parts.pop();
+            for (var i = 0; i < parts.length; ++i) handleLine(parts[i]);
+         } else {
+            pause(0.1);
+         }
+      }
+      if (!stopped) {
+         buf += byteArrayToString(p.readStandardOutput());
+         var rest = buf.split("\n");
+         for (var k = 0; k < rest.length; ++k) handleLine(rest[k]);
+         var err = byteArrayToString(p.readStandardError()).trim();
+         if (p.exitCode != 0) console.criticalln("Scanner exit code " + p.exitCode + (err.length ? ": " + err.substring(0, 500) : ""));
+         else if (err.length) console.warningln(err.substring(0, 500));
+      }
+   } catch (e) {
+      console.criticalln("External scanner: " + e.message);
+      try { if (p.isRunning) p.kill(); } catch (e2) { }
+   }
+   return { stopped: stopped, scanned: counts.scanned, flagged: counts.flagged, skipped: counts.skipped, seconds: (Date.now() - t0) / 1000 };
+};
 
 SweeperDialog.prototype.scan = function () {
    var self = this;
@@ -844,11 +1145,20 @@ SweeperDialog.prototype.scan = function () {
    console.writeln("<end><cbr><b>" + TITLE + " " + VERSION + "</b>: " + files.length + " frames in " + this.folder);
    var t0 = Date.now(), flagged = 0, skipped = 0, scanned = 0, lightsOnly = this.lightsOnlyCheck.checked;
    var stopped = false;
-   verboseLog = this.verboseCheck.checked;
    abortRequested = function () { return self.stopRequested || console.abortRequested; };
+   var external = this.externalCheck.checked;
+   if (external && !this.ext.ready) this.probeExternal();
+   if (external && !this.ext.ready) {
+      console.warningln("Parallel scanner not available (" + this.ext.message.replace(/<[^>]*>/g, "") + "): using the built-in scanner.");
+      external = false;
+   }
+   if (external) {
+      var ext = this.scanExternal(files);
+      stopped = ext.stopped; scanned = ext.scanned; flagged = ext.flagged; skipped = ext.skipped;
+   } else
    for (var k = 0; k < files.length; ++k) {
-      this.progressLabel.text = format("Scanning %d / %d  (%d flagged, %d skipped)  %s", k + 1, files.length,
-                                       flagged, skipped, File.extractNameAndExtension(files[k]));
+      this.progressLabel.text = format("Scanning %d / %d  (%d listed, %d skipped)  %s", k + 1, files.length,
+                                       flagged, skipped, shortName(files[k], 48));
       processEvents();
       if (abortRequested()) { stopped = true; break; }
       if (verboseLog) { console.writeln(format("<end><cbr>[%d/%d] %s", k + 1, files.length, files[k])); console.flush(); }
@@ -877,6 +1187,7 @@ SweeperDialog.prototype.scan = function () {
    }
    abortRequested = null;
    if (stopped) console.warningln("Scan stopped by user after " + this.results.length + " of " + files.length + " frames");
+   this.rebuildList();
    this.scanning = false;
    this.scanButton.enabled = true; this.stopButton.enabled = false;
    var cur = this.tree.currentNode;
@@ -891,6 +1202,10 @@ SweeperDialog.prototype.saveSettings = function () {
    writeSetting("alert", DataType_Double, this.alert);
    writeSetting("recursive", DataType_Boolean, this.recursiveCheck.checked);
    writeSetting("lightsOnly", DataType_Boolean, this.lightsOnlyCheck.checked);
+   writeSetting("external", DataType_Boolean, this.externalCheck.checked);
+   writeSetting("pythonPath", DataType_String, this.pythonEdit.text.trim());
+   writeSetting("cliPath", DataType_String, this.cliEdit.text.trim());
+   writeSetting("workers", DataType_Int32, this.workers);
    if (this.folder.length) writeSetting("folder", DataType_String, this.folder);
 };
 
@@ -991,6 +1306,7 @@ SweeperDialog.prototype.summaryText = function () {
 };
 
 SweeperDialog.prototype.showPreview = function (index) {
+   if (index >= 0 && index < this.results.length) this.ensurePreview(this.results[index]);
    if (index < 0 || index >= this.results.length || !this.results[index].preview) {
       this.setBitmap(null, -1); this.previewInfo.text = this.summaryText(); return;
    }

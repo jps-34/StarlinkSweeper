@@ -10,6 +10,7 @@ Creates, for the current script version:
 
 The archive follows the layout required by PixInsight:
   src/scripts/StarlinkSweeper/StarlinkSweeper.js  (+ .xsgn if present next to the .js)
+  src/scripts/StarlinkSweeper/starlinksweeper.py  (command-line version, used by the parallel scan)
   src/scripts/StarlinkSweeper/LICENSE
 
 Order for a signed release:
@@ -34,7 +35,8 @@ PACKAGES = [
         "desc": "Scans a folder tree of light frames (FITS / XISF) for satellite, Starlink train and "
                 "aircraft trails, lists the affected frames with a score, shows each detection on a "
                 "preview, and lets you quarantine (move to a _trails sub-folder) or erase them one by "
-                "one with confirmation. Installs under Script > Utilities > StarlinkSweeper.",
+                "one with confirmation. Optional parallel scan through the bundled Python command-line "
+                "version (Python 3 with numpy, scipy and astropy). Installs under Script > Utilities > StarlinkSweeper.",
     },
 ]
 SUMMARY = "StarlinkSweeper: finds the light frames crossed by satellite trails."
@@ -54,6 +56,7 @@ def build_zip(pkg, version, outdir):
     zname = "%s-%s-%s.zip" % (NAME, version, pkg["suffix"])
     zpath = os.path.join(outdir, zname)
     entries = [(src, "src/scripts/%s/%s.js" % (NAME, base)),
+               (os.path.join(ROOT, "python", "starlinksweeper.py"), "src/scripts/%s/starlinksweeper.py" % NAME),
                (os.path.join(ROOT, "LICENSE"), "src/scripts/%s/LICENSE" % NAME)]
     sig = os.path.splitext(src)[0] + ".xsgn"
     if os.path.exists(sig):
