@@ -28,9 +28,10 @@ integration. StarlinkSweeper finds it.
 
 ## What it does
 
-1. **Scan.** Every FITS / XISF file of the chosen folder (sub-folders included) is binned,
-   background-subtracted and searched for straight lines in every direction. Expect a few seconds
-   per 60 Mpx frame.
+1. **Scan.** Every FITS / XISF light frame of the chosen folder (sub-folders included) is binned,
+   background-subtracted and searched for straight lines in every direction. Flats, darks and bias
+   found in the tree are recognised from their header and skipped, so a whole night's folder can be
+   scanned as it is. Expect a few seconds per 60 Mpx frame.
 2. **List.** Frames whose best trail scores above the threshold are listed, strongest first, with
    the angle of the trail and the fraction of the frame it covers. A Starlink train shows as several
    parallel lines at the same angle.
@@ -48,7 +49,7 @@ frames themselves; frames already sitting in a `_trails` folder are skipped.
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.0) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` (1.0.1) | 1.9.4 and later |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -91,6 +92,7 @@ far above the others.
 |---|---|
 | **Lights folder** | Root folder to scan. FITS (`.fit`, `.fits`, `.fts`) and XISF files, any case. |
 | **Include sub-folders** | Recursive scan (on by default). Folders named `_trails` are skipped. |
+| **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
 | **Threshold** | Continuity score, in robust σ, above which a frame is listed. Clean frames score well below the default, a visible trail several times above it. The default is deliberately low: lower it to see weaker candidates, raise it if a field with bright straight filaments produces false alarms. Changing it re-filters the list without re-scanning. |
 
 Whatever the threshold, look at the preview before erasing.
@@ -107,7 +109,8 @@ python3 python/starlinksweeper.py /path/to/lights -t 15 -j 4 -o report.csv --lis
 Options: `-r` recursive, `-t` threshold (same default as the script), `-j` parallel processes (default cpu-1),
 `-o` CSV path, `--preview DIR` (PNG for flagged frames, `--preview-all` for every frame),
 `--move DIR` (move flagged frames, never deletes), `--list FILE` (flagged file names, one per
-line, handy to deselect them in your stacking software). The CLI never deletes anything.
+line, handy to deselect them in your stacking software), `--all-types` (also scan flats, darks and
+bias, which are skipped by default from their header). The CLI never deletes anything.
 
 ## How it works, in short
 

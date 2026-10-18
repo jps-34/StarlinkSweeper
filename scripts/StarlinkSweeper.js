@@ -4,16 +4,20 @@
    frames one by one. Nothing is deleted without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.0.0
+ * StarlinkSweeper.js  v1.0.1
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.0.1: only light frames are analysed; flats, darks and bias are recognised
+ *   from their IMAGETYP (or FRAME / FRAMETYP) header and skipped ("Lights only"
+ *   option, on by default). Frames without the keyword are scanned.
  * v1.0.0: first release.
  * ----------------------------------------------------------------------------
- * Point it at the folder tree of your light frames: every FITS / XISF file is
- * scanned for straight trails (satellites, Starlink trains, aircraft). The
+ * Point it at the folder tree of your light frames: every FITS / XISF light
+ * frame is scanned for straight trails (satellites, Starlink trains, aircraft);
+ * flats, darks and bias found in the tree are skipped from their header. The
  * suspect frames are listed with a score and a preview showing the detected
  * trail, so you can check each one and quarantine it (moved to a _trails
  * sub-folder, reversible) or erase it (permanent, confirmed one by one).
@@ -41,7 +45,7 @@
 #include <pjsr/ColorSpace.jsh>
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.0.0";
+var VERSION = "1.0.1";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -436,9 +440,37 @@ function analyseBinned(s8, w8, h8) {
 // ============================================================ end of core
 
 // ------------------------------------------------------------------ file I/O
-function readBinnedImage(filePath) {
+var TYPE_KEYWORDS = ["IMAGETYP", "FRAME", "FRAMETYP"];
+
+function frameType(value) {
+   // Normalised frame type from an IMAGETYP-like keyword value:
+   // "light", "flat", "dark", "bias", "other", or null when empty.
+   var v = String(value).trim().replace(/^'+|'+$/g, "").trim().toLowerCase();
+   if (!v.length) return null;
+   if (v.indexOf("light") >= 0) return "light";
+   if (v.indexOf("flat") >= 0) return "flat";
+   if (v.indexOf("dark") >= 0) return "dark";
+   if (v.indexOf("bias") >= 0 || v.indexOf("offset") >= 0) return "bias";
+   return "other";
+}
+
+function frameTypeFromKeywords(keywords) {
+   // keywords: Array of FITSKeyword (FileFormatInstance.keywords). null if absent.
+   if (!keywords) return null;
+   for (var k = 0; k < TYPE_KEYWORDS.length; ++k)
+      for (var i = 0; i < keywords.length; ++i)
+         if (keywords[i].name == TYPE_KEYWORDS[k]) {
+            var t = frameType(keywords[i].value);
+            if (t) return t;
+         }
+   return null;
+}
+
+function readBinnedImage(filePath, lightsOnly) {
    // Opens the file in a hidden image window, bins it x8 (average) with
    // IntegerResample and returns {data, w, h, W, H}. Channel 0 only.
+   // With lightsOnly, a frame whose header says flat / dark / bias is not
+   // read: {skipped: type} is returned instead.
    var ext = File.extractExtension(filePath);
    var F = new FileFormat(ext, true /*toRead*/, false /*toWrite*/);
    if (F.isNull) throw new Error("No installed file format can read " + ext + " files");
@@ -446,6 +478,10 @@ function readBinnedImage(filePath) {
    if (f.isNull) throw new Error("Unable to instantiate file format " + F.name);
    var d = f.open(filePath, "raw cfa verbosity 0");
    if (d.length < 1) throw new Error("Unable to open file " + filePath);
+   if (lightsOnly) {
+      var type = frameTypeFromKeywords(f.keywords);
+      if (type != null && type != "light") { f.close(); return { skipped: type }; }
+   }
    var window = new ImageWindow(d[0].width, d[0].height, d[0].numberOfChannels,
                                 32 /*bitsPerSample*/, true /*float*/,
                                 d[0].colorSpace != ColorSpace_Gray, "StarlinkSweeper_tmp");
@@ -477,9 +513,10 @@ function readBinnedImage(filePath) {
    }
 }
 
-function analyseFile(filePath) {
+function analyseFile(filePath, lightsOnly) {
    var t0 = Date.now();
-   var b = readBinnedImage(filePath);
+   var b = readBinnedImage(filePath, lightsOnly);
+   if (b.skipped) return { file: filePath, skipped: b.skipped, score: -1, lines: [], status: "skipped", preview: null };
    var res = analyseBinned(b.data, b.w, b.h);
    res.file = filePath;
    res.width = b.W; res.height = b.H;
@@ -542,6 +579,11 @@ function SweeperDialog() {
    this.recursiveCheck = new CheckBox(this);
    this.recursiveCheck.text = "Include sub-folders";
    this.recursiveCheck.checked = true;
+   this.lightsOnlyCheck = new CheckBox(this);
+   this.lightsOnlyCheck.text = "Lights only";
+   this.lightsOnlyCheck.checked = true;
+   this.lightsOnlyCheck.toolTip = "<p>Skip the frames whose header (IMAGETYP, FRAME or FRAMETYP) says flat, dark "
+      + "or bias, so a whole night's folder can be scanned. Frames without the keyword are scanned.</p>";
 
    var folderSizer = new HorizontalSizer;
    folderSizer.spacing = 4;
@@ -550,6 +592,8 @@ function SweeperDialog() {
    folderSizer.add(this.folderButton);
    folderSizer.addSpacing(8);
    folderSizer.add(this.recursiveCheck);
+   folderSizer.addSpacing(8);
+   folderSizer.add(this.lightsOnlyCheck);
 
    // ---- threshold + scan
    this.thresholdControl = new NumericControl(this);
@@ -704,16 +748,24 @@ SweeperDialog.prototype.scan = function () {
    console.show();
    console.abortEnabled = true;
    console.writeln("<end><cbr><b>" + TITLE + " " + VERSION + "</b>: " + files.length + " frames in " + this.folder);
-   var t0 = Date.now(), flagged = 0;
+   var t0 = Date.now(), flagged = 0, skipped = 0, scanned = 0, lightsOnly = this.lightsOnlyCheck.checked;
    for (var k = 0; k < files.length; ++k) {
       if (this.stopRequested || console.abortRequested) { console.warningln("Scan stopped by user"); break; }
-      this.progressLabel.text = format("Scanning %d / %d  (%d flagged)  %s", k + 1, files.length, flagged,
-                                       File.extractNameAndExtension(files[k]));
+      this.progressLabel.text = format("Scanning %d / %d  (%d flagged, %d skipped)  %s", k + 1, files.length,
+                                       flagged, skipped, File.extractNameAndExtension(files[k]));
       processEvents();
       try {
-         var res = analyseFile(files[k]);
+         var res = analyseFile(files[k], lightsOnly);
+         if (res.skipped) {
+            ++skipped;
+            this.results.push(res);
+            console.writeln(format("[%d/%d] %s  skipped (%s)", k + 1, files.length,
+                                   File.extractNameAndExtension(files[k]), res.skipped.toUpperCase()));
+            continue;
+         }
          res.status = "";
          this.results.push(res);
+         ++scanned;
          var tag = res.score >= this.threshold ? format("TRAIL x%d", res.lines.length) : "ok";
          if (res.score >= this.threshold) ++flagged;
          console.writeln(format("[%d/%d] %s  score %.1f  %.1fs  %s", k + 1, files.length,
@@ -726,8 +778,8 @@ SweeperDialog.prototype.scan = function () {
    }
    this.scanning = false;
    this.scanButton.enabled = true; this.stopButton.enabled = false;
-   this.progressLabel.text = format("%d frames scanned in %.0f s, %d above threshold %.1f.",
-                                    this.results.length, (Date.now() - t0) / 1000, flagged, this.threshold);
+   this.progressLabel.text = format("%d frames scanned in %.0f s, %d above threshold %.1f, %d skipped as non-light.",
+                                    scanned, (Date.now() - t0) / 1000, flagged, this.threshold, skipped);
    console.writeln(this.progressLabel.text);
 };
 
@@ -736,6 +788,7 @@ SweeperDialog.prototype.rebuildList = function () {
    this.tree.clear();
    var order = [];
    for (var i = 0; i < this.results.length; ++i)
+      if (this.results[i].status == "skipped") continue;
       if (this.results[i].score >= this.threshold || this.results[i].status == "error") order.push(i);
    var self = this;
    order.sort(function (a, b) { return self.results[b].score - self.results[a].score; });
@@ -879,6 +932,7 @@ SweeperDialog.prototype.exportCSV = function () {
    for (var i = 0; i < this.results.length; ++i) {
       var r = this.results[i];
       if (r.status == "error") { text += csvEscape(r.file) + ",,,,,error,," + csvEscape(r.error) + "\n"; continue; }
+      if (r.status == "skipped") { text += csvEscape(r.file) + ",,,,,skipped: " + r.skipped + ",,\n"; continue; }
       var desc = [];
       for (var k = 0; k < r.lines.length; ++k) {
          var L = r.lines[k];

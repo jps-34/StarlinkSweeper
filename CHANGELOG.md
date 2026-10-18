@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 (2026-10-18)
+* Only light frames are analysed: flats, darks and bias are recognised from their `IMAGETYP`
+  (or `FRAME` / `FRAMETYP`) header and skipped, in the script (*Lights only* option, on by default)
+  and in the command-line version (`--all-types` to scan everything). Frames without the keyword
+  are scanned. Skipped frames are listed in the CSV report.
+
 ## 1.0.0 (2026-10-18)
 * First release. PixInsight script (`scripts/StarlinkSweeper.js`): folder scan, list of the frames
   crossed by trails with score, angle and extent, preview with the detected trails, quarantine to a

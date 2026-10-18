@@ -13,8 +13,11 @@ Per frame (FITS or uncompressed XISF):
      in at least 3 consecutive segments (rejects arcs of nebula, spikes, chance
      alignments). Score = significance over that run, in robust sigma.
 
-A frame is flagged when its score is above --threshold. Nothing is deleted:
---move only moves flagged frames into a sub-folder.
+Only light frames are analysed: flats, darks and bias are recognised from
+their IMAGETYP (or FRAME / FRAMETYP) header and skipped, unless --all-types is
+given; frames without the keyword are scanned. A frame is flagged when its
+score is above --threshold. Nothing is deleted: --move only moves flagged
+frames into a sub-folder.
 
 Author: Jacques Pouyaud, with Claude. License: MIT.
 """
@@ -30,7 +33,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6
@@ -41,14 +44,60 @@ FLOOR = 4.0                        # internal detection floor; the user threshol
 
 
 # --------------------------------------------------------------------------- I/O
-def read_xisf(path):
-    """Minimal reader for monolithic, uncompressed XISF images (first image)."""
+TYPE_KEYWORDS = ("IMAGETYP", "FRAME", "FRAMETYP")
+
+
+def frame_type(value):
+    """Normalised frame type from an IMAGETYP-like keyword value:
+    'light', 'flat', 'dark', 'bias', 'other', or None when empty."""
+    v = str(value).strip().strip("'\"").strip().lower()
+    if not v:
+        return None
+    if "light" in v:
+        return "light"
+    if "flat" in v:
+        return "flat"
+    if "dark" in v:
+        return "dark"
+    if "bias" in v or "offset" in v:
+        return "bias"
+    return "other"
+
+
+def xisf_header(path):
     with open(path, "rb") as f:
         if f.read(8) != b"XISF0100":
             raise ValueError("not an XISF 1.0 file")
         hlen = int.from_bytes(f.read(4), "little")
         f.read(4)
-        hdr = f.read(hlen).decode("utf-8", "replace")
+        return f.read(hlen).decode("utf-8", "replace")
+
+
+def read_frame_type(path):
+    """Frame type from the header keywords IMAGETYP, FRAME or FRAMETYP (None if absent)."""
+    if path.lower().endswith(".xisf"):
+        hdr = xisf_header(path)
+        for k in TYPE_KEYWORDS:
+            m = re.search(r'<FITSKeyword\s+name="%s"\s+value="([^"]*)"' % k, hdr)
+            if m:
+                t = frame_type(m.group(1).replace("&apos;", "'"))
+                if t:
+                    return t
+        return None
+    from astropy.io import fits
+    with fits.open(path, memmap=True) as hdul:
+        for hdu in hdul:
+            for k in TYPE_KEYWORDS:
+                if k in hdu.header:
+                    t = frame_type(hdu.header[k])
+                    if t:
+                        return t
+    return None
+
+
+def read_xisf(path):
+    """Minimal reader for monolithic, uncompressed XISF images (first image)."""
+    hdr = xisf_header(path)
     m = re.search(r"<Image\b[^>]*>", hdr)
     if not m:
         raise ValueError("no <Image> element")
@@ -330,8 +379,12 @@ def save_preview(z, res, outdir):
 
 
 def worker(args):
-    path, threshold, preview_dir, preview_all = args
+    path, threshold, preview_dir, preview_all, lights_only = args
     try:
+        if lights_only:
+            t = read_frame_type(path)
+            if t is not None and t != "light":
+                return {"file": path, "skipped": t}
         res, z = analyse(path, threshold=threshold)
         if preview_dir and (res["flagged"] or preview_all):
             save_preview(z, res, preview_dir)
@@ -353,6 +406,8 @@ def main():
     ap.add_argument("--preview-all", action="store_true", help="PNG for every frame, not only flagged")
     ap.add_argument("--move", metavar="DIR", help="move flagged frames into DIR (never deletes)")
     ap.add_argument("--list", metavar="FILE", help="write flagged file names, one per line")
+    ap.add_argument("--all-types", action="store_true",
+                    help="scan every frame; by default flats, darks and bias (IMAGETYP header) are skipped")
     a = ap.parse_args()
 
     files = []
@@ -372,7 +427,7 @@ def main():
         os.makedirs(a.preview, exist_ok=True)
 
     print("StarlinkSweeper %s: %d frames, %d jobs, threshold %.1f" % (VERSION, len(files), a.jobs, a.threshold))
-    jobs = [(f, a.threshold, a.preview, a.preview_all) for f in files]
+    jobs = [(f, a.threshold, a.preview, a.preview_all, not a.all_types) for f in files]
     results, t0 = [], time.time()
     with ProcessPoolExecutor(max_workers=a.jobs) as ex:
         for k, res in enumerate(ex.map(worker, jobs), 1):
@@ -380,6 +435,8 @@ def main():
             name = os.path.basename(res["file"])
             if "error" in res:
                 print("[%d/%d] %s  ERROR %s" % (k, len(files), name, res["error"]))
+            elif "skipped" in res:
+                print("[%d/%d] %-58s skipped (%s)" % (k, len(files), name[:58], res["skipped"].upper()))
             else:
                 tag = "TRAIL x%d" % res["n_lines"] if res["flagged"] else "ok"
                 print("[%d/%d] %-58s score %6.1f (peak %5.1f) %5.1fs  %s"
@@ -387,10 +444,13 @@ def main():
 
     with open(a.csv, "w", newline="") as f:
         wr = csv.writer(f)
-        wr.writerow(["file", "flagged", "score", "coarse_peak", "n_lines", "lines(score@angle:x0,y0-x1,y1)", "error"])
+        wr.writerow(["file", "flagged", "score", "coarse_peak", "n_lines", "lines(score@angle:x0,y0-x1,y1)", "status"])
         for r in results:
             if "error" in r:
-                wr.writerow([r["file"], "", "", "", "", "", r["error"]])
+                wr.writerow([r["file"], "", "", "", "", "", "error: " + r["error"]])
+                continue
+            if "skipped" in r:
+                wr.writerow([r["file"], "", "", "", "", "", "skipped: " + r["skipped"]])
                 continue
             desc = " | ".join("%.1f@%.2f:%d,%d-%d,%d" % (l["score"], l["angle"], l["x0"], l["y0"], l["x1"], l["y1"])
                               for l in r["lines"])
@@ -398,9 +458,11 @@ def main():
 
     flagged = [r["file"] for r in results if r.get("flagged")]
     scores = [r["score"] for r in results if "score" in r]
+    skipped = sum(1 for r in results if "skipped" in r)
     if scores:
         print("\nScores: median %.1f, min %.1f, max %.1f" % (np.median(scores), min(scores), max(scores)))
-    print("%d / %d frames flagged, %.0f s total. Report: %s" % (len(flagged), len(results), time.time() - t0, a.csv))
+    print("%d / %d frames flagged (%d skipped as non-light), %.0f s total. Report: %s"
+          % (len(flagged), len(scores), skipped, time.time() - t0, a.csv))
     if a.list:
         with open(a.list, "w") as f:
             f.write("\n".join(os.path.basename(x) for x in flagged) + ("\n" if flagged else ""))

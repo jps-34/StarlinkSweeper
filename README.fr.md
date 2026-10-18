@@ -29,9 +29,11 @@ l'intégration. StarlinkSweeper la trouve.
 
 ## Ce qu'il fait
 
-1. **Scan.** Chaque fichier FITS / XISF du dossier choisi (sous-dossiers compris) est binné, son
-   fond soustrait, puis parcouru à la recherche de lignes droites dans toutes les directions.
-   Compter quelques secondes par brute de 60 Mpx.
+1. **Scan.** Chaque brute (light) FITS / XISF du dossier choisi (sous-dossiers compris) est
+   binnée, son fond soustrait, puis parcourue à la recherche de lignes droites dans toutes les
+   directions. Les flats, darks et bias présents dans l'arborescence sont reconnus à leur en-tête
+   et ignorés : le dossier d'une nuit entière se scanne tel quel. Compter quelques secondes par
+   brute de 60 Mpx.
 2. **Liste.** Les brutes dont la meilleure traînée dépasse le seuil sont listées, la plus forte en
    premier, avec l'angle de la traînée et la fraction du champ qu'elle couvre. Un train Starlink
    apparaît comme plusieurs lignes parallèles au même angle.
@@ -50,7 +52,7 @@ modifiées ; celles qui sont déjà dans un dossier `_trails` sont ignorées.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.0.0) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` (1.0.1) | 1.9.4 et suivants |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -95,6 +97,7 @@ ressort loin au-dessus des autres.
 |---|---|
 | **Lights folder** | Dossier racine à scanner. Fichiers FITS (`.fit`, `.fits`, `.fts`) et XISF, quelle que soit la casse. |
 | **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers nommés `_trails` sont ignorés. |
+| **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
 | **Threshold** | Score de continuité, en σ robuste, au-dessus duquel une brute est listée. Une brute propre est largement sous la valeur par défaut, une traînée visible plusieurs fois au-dessus. La valeur par défaut est volontairement basse : la baisser pour voir des candidats plus faibles, la monter si un champ à filaments brillants et rectilignes donne des fausses alertes. La changer refiltre la liste sans relancer le scan. |
 
 Quel que soit le seuil, regarder l'aperçu avant d'effacer.
@@ -112,7 +115,8 @@ Options : `-r` récursif, `-t` seuil (même valeur par défaut que le script), `
 parallèles (cpu-1 par défaut), `-o` chemin du CSV, `--preview DIR` (PNG des brutes signalées,
 `--preview-all` pour toutes), `--move DIR` (déplace les brutes signalées, ne supprime jamais),
 `--list FICHIER` (noms des brutes signalées, un par ligne, pratique pour les décocher dans le
-logiciel d'empilement). La ligne de commande ne supprime jamais rien.
+logiciel d'empilement), `--all-types` (scanner aussi les flats, darks et bias, ignorés par défaut
+d'après leur en-tête). La ligne de commande ne supprime jamais rien.
 
 ## Comment ça marche, en bref
 
