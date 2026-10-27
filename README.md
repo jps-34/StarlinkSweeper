@@ -173,9 +173,17 @@ decimal.
 
 ## License
 
-Copyright (c) 2026 Jacques Pouyaud. Released under the [MIT License](LICENSE).
+Copyright (c) 2026 Jacques Pouyaud. Released under the
+[GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later): you may use, study,
+share and modify it; any distributed work that includes this code must be released under the same
+licence, with its source code. Versions up to 1.2.0 were released under the MIT License, which
+still applies to copies of those versions.
 
-If you build on it, a mention and a link back to this repository are appreciated.
+**Credit request.** If you reuse the method or the code of StarlinkSweeper, in a script, an
+application or a tutorial, please credit it by name with a link to this repository. This is a
+request, not a licence condition; when the code itself is reused, the GPL already requires keeping
+the copyright notice.
+
 Bug reports and suggestions are welcome as GitHub issues.
 
 ## Credits

@@ -185,9 +185,17 @@ commande donnent les mêmes scores à la décimale.
 
 ## Licence
 
-Copyright (c) 2026 Jacques Pouyaud. Publié sous [licence MIT](LICENSE).
+Copyright (c) 2026 Jacques Pouyaud. Publié sous
+[licence publique générale GNU, version 3 ou ultérieure](LICENSE) (GPL-3.0-or-later) : il peut être
+utilisé, étudié, partagé et modifié ; toute œuvre distribuée qui intègre ce code doit être publiée
+sous la même licence, avec son code source. Les versions jusqu'à 1.2.0 ont été publiées sous licence
+MIT, qui reste valable pour les copies de ces versions.
 
-Si vous en faites quelque chose, une mention et un lien vers ce dépôt sont appréciés.
+**Demande de crédit.** En cas de reprise de la méthode ou du code de StarlinkSweeper, dans un
+script, une application ou un tutoriel, merci de le citer par son nom avec un lien vers ce dépôt.
+C'est une demande, pas une condition de la licence ; quand le code lui-même est repris, la GPL
+impose déjà de conserver la mention de copyright.
+
 Rapports de bugs et suggestions bienvenus via les issues GitHub.
 
 ## Crédits

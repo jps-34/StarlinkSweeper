@@ -39,7 +39,7 @@ PACKAGES = [
     },
 ]
 SUMMARY = "StarlinkSweeper: finds the light frames crossed by satellite trails."
-NOTICE = "Copyright (c) 2026 Jacques Pouyaud. MIT License. Source: https://github.com/{user}/StarlinkSweeper"
+NOTICE = "Copyright (c) 2026 Jacques Pouyaud. GNU GPL v3 or later. Source: https://github.com/{user}/StarlinkSweeper"
 
 
 def script_version(path):

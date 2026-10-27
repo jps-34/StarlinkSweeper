@@ -6,12 +6,16 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.2.0
- * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
+ * StarlinkSweeper.js  v1.2.1
+ * Copyright (c) 2026 Jacques Pouyaud.
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Free software under the GNU General Public License, version 3 or (at your
+ * option) any later version, WITHOUT ANY WARRANTY; see LICENSE.
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.2.1: licence changed to GPL-3.0-or-later (1.2.0 and earlier: MIT).
  * v1.2.0: runs on the V8 engine of PixInsight; parallel scan on threads
  *   (PixInsight 1.9.5), Threads setting; the Python option is removed from the
  *   dialog (the command-line version stays as a separate tool).
@@ -80,7 +84,7 @@
 CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.2.0";
+var VERSION = "1.2.1";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.

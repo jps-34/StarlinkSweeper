@@ -19,7 +19,9 @@ given; frames without the keyword are scanned. A frame is flagged when its
 score is above --threshold. Nothing is deleted: --move only moves flagged
 frames into a sub-folder.
 
-Author: Jacques Pouyaud, with Claude. License: MIT.
+Author: Jacques Pouyaud, with Claude.
+Copyright (c) 2026 Jacques Pouyaud. SPDX-License-Identifier: GPL-3.0-or-later
+(GNU General Public License, version 3 or any later version; see LICENSE).
 """
 import argparse
 import csv
@@ -33,7 +35,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from scipy import ndimage as nd
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 EXTS = (".fit", ".fits", ".fts", ".xisf")
 COARSE_BIN, FINE_BIN = 16, 8
 COARSE_STEP, FINE_STEP, FINE_HALF = 0.25, 0.05, 0.6

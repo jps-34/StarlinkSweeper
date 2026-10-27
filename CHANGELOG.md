@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 (2026-10-27)
+* Licence changed from MIT to the GNU General Public License, version 3 or later
+  (GPL-3.0-or-later). Versions up to 1.2.0 remain available under the MIT License. No change to
+  the behaviour. The command-line Python version follows (1.2.1).
+* README: credit request for reuse of the method or the code.
+
 ## 1.2.0 (2026-10-27)
 * Script ported to the V8 JavaScript engine of PixInsight (`#engine v8`, PixInsight 1.9.4 and
   later): legacy `#include <pjsr/*.jsh>` removed, constants read from the enumeration objects,
