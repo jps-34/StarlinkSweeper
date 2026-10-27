@@ -78,7 +78,7 @@ et `astropy`, à installer une fois :
 1. *Resources > Updates > Manage Repositories*, ajouter
    `https://jps-34.github.io/StarlinkSweeper/`
 2. *Resources > Updates > Check for Updates*, puis redémarrer PixInsight.
-3. Le script apparaît dans *Script > Utilities > StarlinkSweeper*.
+3. Le script apparaît dans *Script > JPS > StarlinkSweeper* (*Script > Utilities* jusqu'à la 1.2.1).
 
 Tant que le dépôt n'est pas signé, PixInsight ne l'accepte qu'avec la préférence de sécurité
 *Allow unsigned update repositories* activée.
@@ -87,7 +87,7 @@ Tant que le dépôt n'est pas signé, PixInsight ne l'accepte qu'avec la préfé
 
 Télécharger `scripts/StarlinkSweeper.js`, puis soit l'exécuter avec *Script > Execute Script
 File*, soit ajouter son dossier avec *Script > Feature Scripts > Add* pour qu'il apparaisse dans le
-menu *Script > Utilities*.
+menu *Script > JPS*.
 
 ## Prise en main
 

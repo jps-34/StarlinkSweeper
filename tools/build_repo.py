@@ -35,7 +35,7 @@ PACKAGES = [
                 "aircraft trails, lists the affected frames with a score, shows each detection on a "
                 "preview, and lets you quarantine (move to a <folder>_trails folder next to the scanned "
                 "one) or erase them one by one with confirmation. Parallel scan on all the processors with "
-                "PixInsight 1.9.5 and later. Installs under Script > Utilities > StarlinkSweeper.",
+                "PixInsight 1.9.5 and later. Installs under Script > JPS > StarlinkSweeper.",
     },
 ]
 SUMMARY = "StarlinkSweeper: finds the light frames crossed by satellite trails."

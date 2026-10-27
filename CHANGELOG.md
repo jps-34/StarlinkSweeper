@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2 (2026-10-27)
+* Menu: the script moves from *Script > Utilities* to *Script > JPS*, the folder that groups
+  the PixInsight scripts of Jacques Pouyaud. No change to the behaviour.
+
 ## 1.2.1 (2026-10-27)
 * Licence changed from MIT to the GNU General Public License, version 3 or later
   (GPL-3.0-or-later). Versions up to 1.2.0 remain available under the MIT License. No change to

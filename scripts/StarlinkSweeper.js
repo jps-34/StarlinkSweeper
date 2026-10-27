@@ -1,12 +1,12 @@
 #engine v8
-#feature-id    StarlinkSweeper : Utilities > StarlinkSweeper
+#feature-id    StarlinkSweeper : JPS > StarlinkSweeper
 #feature-info  Finds subframes crossed by satellite or aircraft trails, shows \
    each detection on a preview, and lets you quarantine (moved next to the \
    scanned folder) or erase the affected frames one by one. Nothing is deleted \
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.2.1
+ * StarlinkSweeper.js  v1.2.2
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,7 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.2.2: menu entry moved to Script > JPS (was Script > Utilities).
  * v1.2.1: licence changed to GPL-3.0-or-later (1.2.0 and earlier: MIT).
  * v1.2.0: runs on the V8 engine of PixInsight; parallel scan on threads
  *   (PixInsight 1.9.5), Threads setting; the Python option is removed from the
@@ -84,7 +85,7 @@
 CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.2.1";
+var VERSION = "1.2.2";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.

@@ -73,7 +73,7 @@ installed once:
 1. *Resources > Updates > Manage Repositories*, add
    `https://jps-34.github.io/StarlinkSweeper/`
 2. *Resources > Updates > Check for Updates*, then restart PixInsight.
-3. The script appears under *Script > Utilities > StarlinkSweeper*.
+3. The script appears under *Script > JPS > StarlinkSweeper* (*Script > Utilities* up to 1.2.1).
 
 Until the repository is code-signed, PixInsight only accepts it with the
 *Allow unsigned update repositories* security preference enabled.
@@ -81,7 +81,7 @@ Until the repository is code-signed, PixInsight only accepts it with the
 ### Manual
 
 Download `scripts/StarlinkSweeper.js`, then either run it with *Script > Execute Script File*, or
-add its folder with *Script > Feature Scripts > Add* so it shows up in the *Script > Utilities*
+add its folder with *Script > Feature Scripts > Add* so it shows up in the *Script > JPS*
 menu.
 
 ## Quick start
