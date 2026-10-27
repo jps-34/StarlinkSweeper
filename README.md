@@ -31,7 +31,8 @@ integration. StarlinkSweeper finds it.
 1. **Scan.** Every FITS / XISF light frame of the chosen folder (sub-folders included) is binned,
    background-subtracted and searched for straight lines in every direction. Flats, darks and bias
    found in the tree are recognised from their header and skipped, so a whole night's folder can be
-   scanned as it is. Expect a few seconds per 60 Mpx frame.
+   scanned as it is. Expect a few seconds per 60 Mpx frame and per processor: with PixInsight 1.9.5
+   the frames are analysed in parallel (see *Parallel scan*).
 2. **List.** Frames whose best trail scores 20 or more are listed, strongest first, with the angle
    of the trail and the fraction of the frame it covers; from the adjustable *Red above* level they
    are shown in red. A Starlink train shows as several parallel lines at the same angle.
@@ -52,22 +53,18 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.5) | 1.9.4 and later |
+| `scripts/StarlinkSweeper.js` | 1.9.4 and later (1.9.5 for the parallel scan) |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
-The command-line version, `python/starlinksweeper.py`, needs Python 3 with `numpy`, `scipy` and
-`astropy`, installed once:
+The command-line version, `python/starlinksweeper.py`, is a separate tool for batch use outside
+PixInsight; the script does not need it. It needs Python 3 with `numpy`, `scipy` and `astropy`,
+installed once:
 
 * Debian, Ubuntu and derivatives: `sudo apt install python3-numpy python3-scipy python3-astropy`
   (pip refuses to write into the system Python there);
 * Windows, macOS, other Linux: `pip install numpy scipy astropy` (or `py -3 -m pip ...`);
-* or a virtual environment: `python3 -m venv <folder> && <folder>/bin/pip install numpy scipy astropy`,
-  then give `<folder>/bin/python` in the *Python* field of the dialog.
-
-It runs several frames in parallel, and the PixInsight script can delegate its scan to it (see
-*Parallel scan* below): the PixInsight JavaScript engine is single-threaded, so this is how a large
-batch gets all the cores. **Without Python the script still works**, on one core.
+* or a virtual environment: `python3 -m venv <folder> && <folder>/bin/pip install numpy scipy astropy`.
 
 ## Installation
 
@@ -102,15 +99,12 @@ far above the others.
 
 ## Parallel scan
 
-The *Scanner* box of the dialog offers **Parallel scan with Python**. When it is ticked, the scan is
-run by the bundled command-line version (installed next to the script, same algorithm, same scores)
-with several frames at once, and the results stream into the list as they come; the review,
-preview, quarantine and erase stay in the dialog. It needs Python 3 with `numpy`, `scipy` and
-`astropy`; the box says what it found, and **Detect** checks again after an installation.
-
-The **Workers** slider goes up to what the machine allows: its CPU threads, capped by the available
-memory (about 100 MB plus 5 bytes per pixel per worker). The suggested value leaves one thread free.
-Without Python, or unticked, the scan runs in PixInsight on one core, one frame at a time.
+With PixInsight 1.9.5 and later, the frames are analysed in parallel inside PixInsight, one per
+thread, and the results stream into the list as they come; the scores are the same as one frame at
+a time. **Threads**, in the *Scanner* box: **Auto** (default) uses as many threads as the
+processors allowed in the PixInsight preferences, fewer when the available memory is short (each
+thread holds one frame); **1** analyses one frame at a time. With PixInsight 1.9.4 the scan runs one
+frame at a time. Nothing to install.
 
 ## Settings
 
@@ -120,12 +114,12 @@ Without Python, or unticked, the scan runs in PixInsight on one core, one frame 
 | **Include sub-folders** | Recursive scan (on by default). Quarantine folders (names ending with `_trails`) are skipped. |
 | **Lights only** | On by default: frames whose `IMAGETYP` (or `FRAME`, `FRAMETYP`) header says flat, dark or bias are skipped and listed as such in the CSV report. Frames without the keyword are scanned. Untick to scan every frame. |
 | **Red above** | Frames whose best trail scores at or above this value are shown in red: a trail that strong is never a false alarm, so **Quarantine red** moves them all in one go. Frames between the listing level and this value deserve a look at the preview. Changing it re-colours the list without re-scanning. |
-| **Parallel scan with Python**, **Python**, **Script**, **Workers** | See *Parallel scan*. Python and script paths can be left empty (searched in the PATH and next to the installed script). |
+| **Threads** | Frames analysed at the same time; see *Parallel scan*. |
 
 Frames and lines are listed from a fixed score of 20 up. The score is a significance in units of
 the frame's own noise (see *How it works*), so this level does not depend on exposure, gain or
 camera: clean frames stay far below it, a visible trail lands several times above it. Red level,
-scanner options, workers and the last folder are remembered from one session to the next; the
+options, threads and the last folder are remembered from one session to the next; the
 **Reset** button (bottom left, PixInsight style) forgets them all and restores the defaults.
 
 Whatever the level, look at the preview before erasing.

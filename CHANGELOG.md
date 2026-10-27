@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 (2026-10-27)
+* Script ported to the V8 JavaScript engine of PixInsight (`#engine v8`, PixInsight 1.9.4 and
+  later): legacy `#include <pjsr/*.jsh>` removed, constants read from the enumeration objects,
+  dialog written as a class, deprecated global functions replaced. Same results as 1.1.5, frame by
+  frame (every score, angle and line end identical on a set of real subs). The legacy SpiderMonkey
+  engine, which ran the script until now, is to be removed from PixInsight.
+* **Parallel scan in PixInsight** (1.9.5 and later): the frames are analysed on PJSR threads, one
+  per thread, and stream into the list as they come; same scores as one frame at a time. New
+  **Threads** setting in the *Scanner* box (Auto by default: the processors allowed by the
+  PixInsight preferences, fewer when the available memory is short; 1 = one frame at a time). Stop
+  interrupts the threads. With PixInsight 1.9.4 the scan runs one frame at a time.
+* The **Parallel scan with Python** option is removed from the dialog (Python, Script, Workers and
+  Detect with it): the threads replace it, with nothing to install. The command-line version
+  `python/starlinksweeper.py` stays in the repository as a separate tool and is no longer packed
+  into the update archive. Reset also forgets the settings of the former Python option.
+* Frames read without an image window (`FileFormatInstance`) and binned by hand, with the same
+  values as IntegerResample: the same reading for the threads and for the scan in series.
+* Tests: `tests/run_scan_pi.js` (analysis of a list of frames inside PixInsight, without the
+  dialog, in series or on threads) and `tests/compare_scans.py` (two runs compared field by
+  field).
+* Maintenance notes: development on the forge, publication of validated versions only on GitHub.
+
 ## 1.1.5 (2026-10-18)
 * The machine probe (Detect) works with no folder selected; the command line refused the call,
   so Detect failed right after a Reset.

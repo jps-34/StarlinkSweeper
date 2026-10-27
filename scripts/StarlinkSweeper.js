@@ -1,3 +1,4 @@
+#engine v8
 #feature-id    StarlinkSweeper : Utilities > StarlinkSweeper
 #feature-info  Finds subframes crossed by satellite or aircraft trails, shows \
    each detection on a preview, and lets you quarantine (moved next to the \
@@ -5,12 +6,15 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.1.5
+ * StarlinkSweeper.js  v1.2.0
  * Copyright (c) 2026 Jacques Pouyaud. MIT License (see LICENSE).
  * Code written by Claude (Anthropic),
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.2.0: runs on the V8 engine of PixInsight; parallel scan on threads
+ *   (PixInsight 1.9.5), Threads setting; the Python option is removed from the
+ *   dialog (the command-line version stays as a separate tool).
  * v1.1.5: the machine probe works with no folder selected (the command line
  *   refused it, so Detect failed right after a Reset).
  * v1.1.4: Reset button (PixInsight style, bottom left) that forgets every
@@ -73,18 +77,10 @@
  *      saturated star is a diffraction spike and is rejected.
  */
 
-#include <pjsr/Sizer.jsh>
-#include <pjsr/FrameStyle.jsh>
-#include <pjsr/TextAlign.jsh>
-#include <pjsr/StdButton.jsh>
-#include <pjsr/StdIcon.jsh>
-#include <pjsr/NumericControl.jsh>
-#include <pjsr/UndoFlag.jsh>
-#include <pjsr/ColorSpace.jsh>
-#include <pjsr/DataType.jsh>
+CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.1.5";
+var VERSION = "1.2.0";
 
 // ---------------------------------------------------------------- parameters
 // Keep these identical to starlinksweeper.py so both tools give the same scores.
@@ -115,7 +111,13 @@ var abortRequested = null;   // set by the dialog to a function returning true t
 
 function checkAbort() {
    // Lets the GUI breathe between heavy stages and stops the scan when asked.
-   if (typeof processEvents == "function") processEvents();
+   // In a scan thread (PixInsight 1.9.5): the abort request of the thread only,
+   // since a thread has no user interface.
+   if (typeof Thread != "undefined" && Thread.current) {
+      if (Thread.current.isAborted) throw new Error("__abort__");
+      return;
+   }
+   if (typeof CoreApplication != "undefined") CoreApplication.processEvents();
    if (abortRequested && abortRequested()) throw new Error("__abort__");
 }
 
@@ -526,11 +528,21 @@ function stage(msg) {
    if (verboseLog) { console.writeln("<end><cbr>    " + msg); console.flush(); }
 }
 
+function keywordsType(f, what) {
+   // Frame type from the keywords of an open FileFormatInstance; null if unknown.
+   var keywords = null;
+   try { keywords = f.keywords; } catch (e) { stage(what + " unavailable: " + e.message); }
+   var t = frameTypeFromKeywords(keywords);
+   stage("frame type " + (t == null ? "unknown" : t) + " (" + what + ")");
+   return t;
+}
+
 function readBinnedImage(filePath, lightsOnly) {
-   // Opens the file in a hidden image window, bins it x8 (average) with
-   // IntegerResample and returns {data, w, h, W, H}. Channel 0 only.
-   // With lightsOnly, a frame whose header says flat / dark / bias is closed
-   // right after reading: {skipped: type} is returned instead.
+   // Reads the file without an image window (also usable in a scan thread)
+   // and bins channel 0 x8 by averaging complete 8x8 blocks, band by band:
+   // the same values, to the bit, as IntegerResample (Average). Returns
+   // {data, w, h, W, H}. With lightsOnly, a frame whose header says flat /
+   // dark / bias is not read: {skipped: type} is returned instead.
    var ext = File.extractExtension(filePath);
    stage("format " + ext);
    var F = new FileFormat(ext, true /*toRead*/, false /*toWrite*/);
@@ -541,54 +553,32 @@ function readBinnedImage(filePath, lightsOnly) {
    var d = f.open(filePath, "raw cfa verbosity 0");
    if (d.length < 1) throw new Error("Unable to open file " + filePath);
    stage("opened " + d[0].width + "x" + d[0].height + "x" + d[0].numberOfChannels);
-   var type = null;
-   if (lightsOnly) {
-      var fileKeywords = null;
-      try { fileKeywords = f.keywords; } catch (e) { stage("file keywords unavailable: " + e.message); }
-      type = frameTypeFromKeywords(fileKeywords);
-      stage("frame type " + (type == null ? "unknown" : type) + " (file keywords)");
-      if (type != null && type != "light") { f.close(); return { skipped: type }; }
-   }
-   var window = new ImageWindow(d[0].width, d[0].height, d[0].numberOfChannels,
-                                32 /*bitsPerSample*/, true /*float*/,
-                                d[0].colorSpace != ColorSpace_Gray, "StarlinkSweeper_tmp");
-   var view = window.mainView;
+   var img = new Image;
    try {
-      checkAbort();
-      stage("read image");
-      view.beginProcess(UndoFlag_NoSwapFile);
-      if (!f.readImage(view.image)) throw new Error("Unable to read image " + filePath);
-      view.endProcess();
-      f.close();
-      if (lightsOnly && type == null) {                 // fallback: keywords carried by the window
-         var winKeywords = null;
-         try { winKeywords = window.keywords; } catch (e) { stage("window keywords unavailable: " + e.message); }
-         type = frameTypeFromKeywords(winKeywords);
-         stage("frame type " + (type == null ? "unknown" : type) + " (window keywords)");
+      var type = null;
+      if (lightsOnly) {
+         type = keywordsType(f, "file keywords");
          if (type != null && type != "light") return { skipped: type };
       }
       checkAbort();
-      var W = view.image.width, H = view.image.height;
-      stage("bin x" + FINE_BIN);
-      var P = new IntegerResample;
-      P.zoomFactor = -FINE_BIN;
-      P.downsamplingMode = IntegerResample.prototype.Average;
-      P.noGUIMessages = true;
-      P.executeOn(view, false /*swapFile*/);
-      var img = view.image, w = img.width, h = img.height;
-      stage("get samples " + w + "x" + h);
-      var data = new Float32Array(w * h);
-      img.getSamples(data, new Rect(0, 0, w, h), 0);
-      var touched = false;
-      for (var i = 0; i < data.length && !touched; i += 997) touched = data[i] != 0;
-      if (!touched) {                       // this PixInsight build ignores typed arrays: use a plain Array
-         var tmp = [];
-         img.getSamples(tmp, new Rect(0, 0, w, h), 0);
-         data.set(tmp);
+      stage("read image");
+      if (!f.readImage(img)) throw new Error("Unable to read image " + filePath);
+      if (lightsOnly && type == null) {          // some formats give their keywords once the image is read
+         type = keywordsType(f, "keywords after reading");
+         if (type != null && type != "light") return { skipped: type };
+      }
+      checkAbort();
+      var W = img.width, H = img.height, w = Math.floor(W / FINE_BIN), h = Math.floor(H / FINE_BIN);
+      stage("bin x" + FINE_BIN + " to " + w + "x" + h);
+      var data = new Float32Array(w * h), band = new Float32Array(W * FINE_BIN);
+      for (var y = 0; y < h; ++y) {
+         img.getSamples(band, new Rect(0, y * FINE_BIN, W, (y + 1) * FINE_BIN), 0);
+         data.set(binMean(band, W, FINE_BIN, FINE_BIN).data, y * w);
       }
       return { data: data, w: w, h: h, W: W, H: H };
    } finally {
-      window.forceClose();
+      f.close();
+      img.free();
    }
 }
 
@@ -643,7 +633,7 @@ function makeDirs(path) {
 function listFrames(dir, recursive) {
    var files = [];
    for (var i = 0; i < EXTENSIONS.length; ++i) {
-      var found = searchDirectory(dir + "/*" + EXTENSIONS[i], recursive);
+      var found = File.searchDirectory(dir + "/*" + EXTENSIONS[i], recursive);
       for (var k = 0; k < found.length; ++k)
          if (!inQuarantine(found[k]) && files.indexOf(found[k]) < 0) files.push(found[k]);
    }
@@ -666,109 +656,102 @@ function shortName(path, maxLength) {
    return n.substring(0, keep) + "..." + n.substring(n.length - keep);
 }
 
-// ------------------------------------------------- external scanner (Python)
-// The PixInsight JavaScript engine is single-threaded. The command-line
-// version (starlinksweeper.py, same algorithm) runs several frames at once,
-// so the dialog can delegate the scan to it and keep the review here.
-var CLI_NAME = "starlinksweeper.py";
+// ------------------------------------------------------------ parallel scan
+// PixInsight 1.9.5 runs JavaScript on Thread objects, each in a runtime of its
+// own where nothing of this script exists: the source of a scan thread is
+// built from the constants and functions listed in threadSource(), which must
+// follow every function that analyseFile() calls. Same code, same scores as
+// the scan in series.
 
-function byteArrayToString(ba) {
-   if (ba == null) return "";
-   if (typeof ba == "string") return ba;
-   try { return ba.utf8ToString(); } catch (e) { }
-   try { return ba.toString(); } catch (e2) { }
-   return "";
+function threadSource() {
+   var c = { FINE_BIN: FINE_BIN, COARSE_STEP: COARSE_STEP, FINE_STEP: FINE_STEP, FINE_HALF: FINE_HALF,
+             N_SEG: N_SEG, MIN_RUN: MIN_RUN, SEG_MIN_SIG: SEG_MIN_SIG, SPIKE_MAX_RUN: SPIKE_MAX_RUN,
+             MAX_CAND: MAX_CAND, FLOOR: FLOOR, MARGIN: MARGIN, STAR_SUM: STAR_SUM, MAX_LINES: MAX_LINES,
+             TYPE_KEYWORDS: TYPE_KEYWORDS };
+   var src = [ "var verboseLog = false, abortRequested = null;" ];
+   for (var k in c) src.push("var " + k + " = " + JSON.stringify(c[k]) + ";");
+   var functions = [ checkAbort, kthSmallest, medianOf, robustSigma, binMean, medianFilter, background,
+                     normalise, Projector, continuity, onBrightStar, endpoints, analyseBinned, frameType,
+                     frameTypeFromKeywords, stage, keywordsType, readBinnedImage, analyseFile ];
+   for (var i = 0; i < functions.length; ++i) src.push(functions[i].toString());
+   var methods = [ "project", "significance", "segments" ];
+   for (var m = 0; m < methods.length; ++m)
+      src.push("Projector.prototype." + methods[m] + " = " + Projector.prototype[methods[m]].toString() + ";");
+   src.push("(function (d) { return analyseFile(d.path, d.lightsOnly); })");
+   return src.join("\n");
 }
 
-function processStream(p, which) {
-   // Text waiting on a process stream (read once, cleared). The accessor name
-   // differs between PixInsight builds, so several are tried; "" when none works.
-   var names = (which == "err") ? ["stderr", "standardError", "readStandardError"]
-                                : ["stdout", "standardOutput", "readStandardOutput"];
-   for (var i = 0; i < names.length; ++i) {
+function scanThreads(files, setting) {
+   // Number of scan threads: 1 (in series) without Thread objects (PixInsight
+   // before 1.9.5) or for a single frame; otherwise the setting, and with 0
+   // (automatic) as many as the processors allowed by the platform, the frames
+   // and the available memory permit (a frame read in full plus working
+   // buffers per thread, from the size of the first frame).
+   if (typeof Thread == "undefined" || files.length < 2) return 1;
+   var n = setting;
+   if (!(n >= 1)) {
+      n = Thread.numberOfProcessors;
       try {
-         var v = p[names[i]];
-         if (typeof v == "function") v = v.call(p);
-         if (v != null) return byteArrayToString(v);
+         var mem = System.physicalMemoryStatus();
+         var f = new FileFormatInstance(new FileFormat(File.extractExtension(files[0]), true, false));
+         var d = f.open(files[0], "raw cfa verbosity 0");
+         f.close();
+         if (mem && mem.availableBytes > 0 && d && d.length > 0) {
+            var per = 4 * d[0].width * d[0].height * (d[0].numberOfChannels + 1) + 268435456;
+            n = Math.min(n, Math.floor(0.6 * mem.availableBytes / per));
+         }
       } catch (e) { }
    }
-   return "";
+   return Math.max(1, Math.min(Math.round(n), files.length));
 }
 
-function runCapture(program, args, timeoutMs) {
-   // Runs a program to completion; returns {ok, code, out, err}; never throws.
-   // The exit code is the reliable part; stdout capture is best effort.
-   var r = { ok: false, code: -1, out: "", err: "" };
-   try {
-      var p = new ExternalProcess;
-      p.start(program, args);
-      if (!p.waitForStarted(5000)) { r.err = "could not start " + program; return r; }
-      if (!p.waitForFinished(timeoutMs)) { try { p.kill(); } catch (e) { } r.err = "timeout after " + timeoutMs + " ms"; return r; }
-      r.out = processStream(p, "out");
-      r.err = processStream(p, "err");
-      r.code = p.exitCode;
-      r.ok = (r.code == 0);
-      if (!r.ok && !r.err.length) r.err = "exit code " + r.code;
-   } catch (e) { r.err = e.message; }
-   return r;
-}
-
-function tempFile(tag) {
-   return File.systemTempDirectory + "/StarlinkSweeper_" + tag + "_" + Date.now() + ".txt";
-}
-
-function readWholeFile(path) {
-   try { return File.exists(path) ? File.readLines(path).join("\n") : ""; } catch (e) { return ""; }
-}
-
-function removeFile(path) {
-   try { if (File.exists(path)) File.remove(path); } catch (e) { }
-}
-
-function findPython(preferred) {
-   // {prog, pre, version, deps} for the first interpreter that runs; deps tells
-   // whether numpy, scipy and astropy import. null when no Python runs at all;
-   // then findPython.lastError says what happened with each candidate.
-   var cands = [];
-   if (preferred && preferred.length) cands.push({ prog: preferred, pre: [] });
-   cands.push({ prog: "python3", pre: [] }, { prog: "python", pre: [] }, { prog: "py", pre: ["-3"] });
-   var found = null, errors = [];
-   for (var i = 0; i < cands.length; ++i) {
-      var c = cands[i], vfile = tempFile("pyver");
-      // the version goes through a file: exit codes are reliable, stdout capture is not everywhere
-      var r = runCapture(c.prog, c.pre.concat(["-c", "import sys; open(sys.argv[1], 'w').write(sys.version.split()[0])", vfile]), 20000);
-      var version = readWholeFile(vfile).trim();
-      removeFile(vfile);
-      if (!r.ok) { errors.push(c.prog + ": " + r.err); continue; }
-      var d = runCapture(c.prog, c.pre.concat(["-c", "import numpy, scipy, astropy"]), 60000);
-      var hit = { prog: c.prog, pre: c.pre, version: version.length ? version : "3", deps: d.ok };
-      if (d.ok) return hit;
-      if (!found) found = hit;
-   }
-   findPython.lastError = errors.join(" | ");
-   return found;
-}
-findPython.lastError = "";
-
-function findCli(preferred) {
-   // The command-line script: a path given by the user, or next to the
-   // installed script under <PixInsight>/src/scripts/StarlinkSweeper/.
-   if (preferred && preferred.length && File.exists(preferred)) return preferred;
-   var roots = [];
-   try { roots.push(CoreApplication.dirPath); } catch (e) { }
-   try { roots.push(File.extractDirectory(CoreApplication.filePath)); } catch (e2) { }
-   var ups = ["", "/..", "/../..", "/../../.."];
-   for (var i = 0; i < roots.length; ++i)
-      for (var k = 0; k < ups.length; ++k) {
-         var cand = roots[i] + ups[k] + "/src/scripts/StarlinkSweeper/" + CLI_NAME;
-         try { if (File.exists(cand)) return File.fullPath(cand); } catch (e3) { }
+function scanFiles(files, lightsOnly, threads, onResult, abort) {
+   // Analyses every file, on `threads` scan threads, or in series with 1.
+   // onResult(index, result) is called as each frame is done (in any order
+   // with threads): the analysis result, {skipped}, or {file, error}.
+   // abort() returns true to stop. Returns true when stopped.
+   var stopped = false;
+   if (threads <= 1) {
+      abortRequested = abort;
+      try {
+         for (var k = 0; k < files.length; ++k) {
+            if (abort()) { stopped = true; break; }
+            try {
+               onResult(k, analyseFile(files[k], lightsOnly));
+            } catch (e) {
+               if (e.message == "__abort__") { stopped = true; break; }
+               onResult(k, { file: files[k], error: e.message });
+            }
+         }
+      } finally {
+         abortRequested = null;
       }
-   return "";
-}
-
-function pause(seconds) {
-   if (typeof sleep == "function") sleep(seconds);
-   else if (typeof msleep == "function") msleep(Math.round(seconds * 1000));
+      return stopped;
+   }
+   var src = threadSource(), next = 0, running = [];
+   try {
+      while (next < files.length || running.length > 0) {
+         while (running.length < threads && next < files.length) {
+            var t = new Thread(src, { path: files[next], lightsOnly: lightsOnly });
+            t.start();
+            running.push({ thread: t, index: next++ });
+         }
+         CoreApplication.processEvents();
+         if (abort()) { stopped = true; break; }
+         var done = null;
+         for (var i = 0; i < running.length && !done; ++i)
+            if (!running[i].thread.isActive) done = running.splice(i, 1)[0];
+         if (!done) { running[0].thread.wait(50); continue; }
+         done.thread.wait();
+         onResult(done.index, done.thread.error ? { file: files[done.index], error: done.thread.error }
+                                                : done.thread.result);
+      }
+   } finally {
+      // every thread joined, also on a stop or an error
+      for (var a = 0; a < running.length; ++a) running[a].thread.abort();
+      for (var j = 0; j < running.length; ++j) running[j].thread.wait();
+   }
+   return stopped;
 }
 
 function readSetting(key, type, fallback) {
@@ -780,7 +763,8 @@ function writeSetting(key, type, value) {
    try { Settings.write(SETTINGS_KEY + "/" + key, type, value); } catch (e) { /* settings are a convenience */ }
 }
 
-var SETTING_KEYS = ["alert", "folder", "recursive", "lightsOnly", "external", "pythonPath", "cliPath", "workers"];
+// the last four belong to the Python option of 1.1.x: removed by Reset as well
+var SETTING_KEYS = ["alert", "folder", "recursive", "lightsOnly", "threads", "external", "pythonPath", "cliPath", "workers"];
 
 function removeSettings() {
    for (var i = 0; i < SETTING_KEYS.length; ++i)
@@ -788,18 +772,17 @@ function removeSettings() {
 }
 
 // ------------------------------------------------------------------- dialog
-function SweeperDialog() {
-   this.__base__ = Dialog;
-   this.__base__();
+class SweeperDialog extends Dialog {
+constructor() {
+   super();
    var self = this;
 
    this.results = [];          // all analysed frames
    this.threshold = LIST_THRESHOLD;
-   this.alert = readSetting("alert", DataType_Double, DEFAULT_ALERT);
-   this.folder = readSetting("folder", DataType_String, "");
+   this.alert = readSetting("alert", DataType.Double, DEFAULT_ALERT);
+   this.folder = readSetting("folder", DataType.String, "");
    if (this.folder.length && !File.directoryExists(this.folder)) this.folder = "";
-   this.ext = { python: null, cli: "", maxWorkers: 1, suggested: 1, ready: false, message: "not checked yet" };
-   this.workers = readSetting("workers", DataType_Int32, 0);          // 0 = suggested
+   this.threads = readSetting("threads", DataType.Int32, 0);          // 0 = automatic
    this.stopRequested = false;
    this.scanning = false;
    this.bitmap = null;         // preview of the current frame
@@ -811,7 +794,7 @@ function SweeperDialog() {
    // ---- folder
    this.folderLabel = new Label(this);
    this.folderLabel.text = "Lights folder:";
-   this.folderLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   this.folderLabel.textAlignment = TextAlignment.Right | TextAlignment.VertCenter;
    this.folderEdit = new Edit(this);
    this.folderEdit.readOnly = true;
    this.folderEdit.text = this.folder;
@@ -830,10 +813,10 @@ function SweeperDialog() {
    this.recursiveCheck = new CheckBox(this);
    this.recursiveCheck.text = "Include sub-folders";
    this.recursiveCheck.toolTip = "<p>Scan the sub-folders too. Quarantine folders (names ending with " + QUARANTINE_SUFFIX + ") are skipped.</p>";
-   this.recursiveCheck.checked = readSetting("recursive", DataType_Boolean, true);
+   this.recursiveCheck.checked = readSetting("recursive", DataType.Boolean, true);
    this.lightsOnlyCheck = new CheckBox(this);
    this.lightsOnlyCheck.text = "Lights only";
-   this.lightsOnlyCheck.checked = readSetting("lightsOnly", DataType_Boolean, true);
+   this.lightsOnlyCheck.checked = readSetting("lightsOnly", DataType.Boolean, true);
    this.lightsOnlyCheck.toolTip = "<p>Skip the frames whose header (IMAGETYP, FRAME or FRAMETYP) says flat, dark "
       + "or bias, so a whole night's folder can be scanned. Frames without the keyword are scanned.</p>";
 
@@ -880,80 +863,39 @@ function SweeperDialog() {
    scanSizer.add(this.scanButton);
    scanSizer.add(this.stopButton);
 
-   // ---- scanner (built-in single core, or the parallel Python command line)
-   this.externalCheck = new CheckBox(this);
-   this.externalCheck.text = "Parallel scan with Python";
-   this.externalCheck.checked = readSetting("external", DataType_Boolean, false);
-   this.externalCheck.toolTip = "<p>Delegate the scan to the command-line version (" + CLI_NAME + ", same algorithm, "
-      + "same scores), which analyses several frames at once. Needs Python 3 with numpy, scipy and astropy, "
-      + "installed once: <i>sudo apt install python3-numpy python3-scipy python3-astropy</i> on Debian or Ubuntu, "
-      + "<i>pip install numpy scipy astropy</i> elsewhere, or a virtual environment whose interpreter you give in "
-      + "the Python field. The review, quarantine and erase stay here.</p>"
-      + "<p>Unticked, or without Python, the scan runs in PixInsight on a single core.</p>";
-   this.externalCheck.onCheck = function (checked) { if (checked) self.probeExternal(); self.updateScannerUi(); };
-   this.pythonEdit = new Edit(this);
-   this.pythonEdit.text = readSetting("pythonPath", DataType_String, "");
-   this.pythonEdit.toolTip = "<p>Python interpreter: leave empty to search python3, python and py in the PATH, "
-      + "or give the full path of the interpreter to use.</p>";
-   this.pythonEdit.setMinWidth(this.logicalPixelsToPhysical(120));
-   this.pythonEdit.onEditCompleted = function () { self.probeExternal(); };
-   this.cliEdit = new Edit(this);
-   this.cliEdit.text = readSetting("cliPath", DataType_String, "");
-   this.cliEdit.toolTip = "<p>Path of " + CLI_NAME + ". Leave empty to use the copy installed with this script.</p>";
-   this.cliEdit.setMinWidth(this.logicalPixelsToPhysical(120));
-   this.cliEdit.onEditCompleted = function () { self.probeExternal(); };
-   this.cliButton = new ToolButton(this);
-   this.cliButton.icon = this.scaledResource(":/icons/select-file.png");
-   this.cliButton.setScaledFixedSize(20, 20);
-   this.cliButton.toolTip = "Locate " + CLI_NAME;
-   this.cliButton.onClick = function () {
-      var ofd = new OpenFileDialog;
-      ofd.caption = "StarlinkSweeper: locate " + CLI_NAME;
-      ofd.filters = [["Python scripts", "*.py"]];
-      if (ofd.execute()) { self.cliEdit.text = ofd.fileName; self.probeExternal(); }
-   };
-   this.workersControl = new NumericControl(this);
-   this.workersControl.label.text = "Workers:";
-   this.workersControl.setRange(1, 64);
-   this.workersControl.slider.setRange(1, 64);
-   this.workersControl.setPrecision(0);
-   this.workersControl.setValue(1);
-   this.workersControl.toolTip = "<p>Frames analysed at the same time. The maximum is what this machine allows: "
-      + "its CPU threads, capped by the available memory (about 100 MB plus 5 bytes per pixel per worker). "
-      + "The suggested value leaves one thread free.</p>";
-   this.workersControl.onValueUpdated = function (v) { self.workers = Math.round(v); };
-   this.detectButton = new PushButton(this);
-   this.detectButton.text = "Detect";
-   this.detectButton.toolTip = "<p>Check Python and its modules again, and measure what this machine allows.</p>";
-   this.detectButton.onClick = function () { self.probeExternal(); };
+   // ---- scanner: frames analysed in parallel on threads (PixInsight 1.9.5)
+   this.threadsLabel = new Label(this);
+   this.threadsLabel.text = "Threads:";
+   this.threadsLabel.textAlignment = TextAlignment.Right | TextAlignment.VertCenter;
+   this.threadsSpin = new SpinBox(this);
+   this.threadsSpin.setRange(0, 256);
+   this.threadsSpin.minimumValueText = "Auto";
+   this.threadsSpin.value = this.threads;
+   this.threadsSpin.toolTip = "<p>Frames analysed at the same time, one per thread. <b>Auto</b> (default): as many as "
+      + "the processors allowed in the PixInsight preferences, fewer when the available memory is short (each "
+      + "thread holds one frame). <b>1</b>: one frame at a time. The scores are the same either way.</p>"
+      + "<p>Needs PixInsight 1.9.5; with earlier versions the scan runs one frame at a time.</p>";
+   this.threadsSpin.onValueUpdated = function (v) { self.threads = v; self.updateScannerUi(); };
    this.scannerStatus = new Label(this);
    this.scannerStatus.text = " ";
    this.scannerStatus.wordWrapping = true;
    this.scannerStatus.useRichText = true;
 
-   var pyRow = new HorizontalSizer;
-   pyRow.spacing = 4;
-   var pyLabel = new Label(this); pyLabel.text = "Python:"; pyLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
-   var cliLabel = new Label(this); cliLabel.text = "Script:"; cliLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
-   pyRow.add(pyLabel); pyRow.add(this.pythonEdit, 40); pyRow.addSpacing(8);
-   pyRow.add(cliLabel); pyRow.add(this.cliEdit, 60); pyRow.add(this.cliButton);
-   var wkRow = new HorizontalSizer;
-   wkRow.spacing = 6;
-   wkRow.add(this.workersControl, 100);
-   wkRow.add(this.detectButton);
+   var threadsRow = new HorizontalSizer;
+   threadsRow.spacing = 6;
+   threadsRow.add(this.threadsLabel);
+   threadsRow.add(this.threadsSpin);
+   threadsRow.addSpacing(8);
+   threadsRow.add(this.scannerStatus, 100);
    this.scannerBox = new GroupBox(this);
    this.scannerBox.title = "Scanner";
    this.scannerBox.sizer = new VerticalSizer;
    this.scannerBox.sizer.margin = 6;
-   this.scannerBox.sizer.spacing = 4;
-   this.scannerBox.sizer.add(this.externalCheck);
-   this.scannerBox.sizer.add(pyRow);
-   this.scannerBox.sizer.add(wkRow);
-   this.scannerBox.sizer.add(this.scannerStatus);
+   this.scannerBox.sizer.add(threadsRow);
 
    this.progressLabel = new Label(this);
    this.progressLabel.text = "Select a folder and press Scan.";
-   this.progressLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   this.progressLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
    this.progressLabel.wordWrapping = true;
 
    // ---- results list
@@ -1011,7 +953,7 @@ function SweeperDialog() {
    this.resetButton.icon = this.scaledResource(":/process-interface/reset.png");
    this.resetButton.setScaledFixedSize(24, 24);
    this.resetButton.toolTip = "<p>Reset: put every setting back to its default and forget the remembered ones "
-      + "(red level, options, Python and script paths, workers, last folder). The results of the current scan are kept.</p>";
+      + "(red level, options, threads, last folder). The results of the current scan are kept.</p>";
    this.resetButton.onClick = function () { self.resetSettings(); };
 
    var actionSizer = new HorizontalSizer;
@@ -1044,13 +986,13 @@ function SweeperDialog() {
       } else {
          g.pen = new Pen(0xFF9A9A9A);
          g.drawTextRect(this.boundsRect, "Select a frame in the list to see the detected trail",
-                        TextAlign_Center | TextAlign_VertCenter);
+                        TextAlignment.Center | TextAlignment.VertCenter);
       }
       g.end();
    };
    this.previewInfo = new Label(this);
    this.previewInfo.text = "No scan yet.";
-   this.previewInfo.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   this.previewInfo.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
    this.previewInfo.useRichText = true;
    this.previewInfo.wordWrapping = true;
 
@@ -1076,187 +1018,29 @@ function SweeperDialog() {
    this.sizer.add(rightSizer, 55);
    this.adjustToContents();
    this.updateScannerUi();
-   if (this.externalCheck.checked) this.probeExternal();
 }
-SweeperDialog.prototype = new Dialog;
+updateScannerUi() {
+   if (typeof Thread == "undefined") {
+      this.threadsSpin.enabled = false;
+      this.scannerStatus.text = "PixInsight before 1.9.5: one frame at a time.";
+      return;
+   }
+   this.scannerStatus.text = this.threads == 1 ? "One frame at a time."
+      : this.threads > 1 ? format("Up to %d frames at a time.", this.threads)
+      : format("Up to %d frames at a time (processors allowed), fewer when memory is short.", Thread.numberOfProcessors);
+}
 
-SweeperDialog.prototype.updateScannerUi = function () {
-   var on = this.externalCheck.checked;
-   this.pythonEdit.enabled = on; this.cliEdit.enabled = on; this.cliButton.enabled = on;
-   this.detectButton.enabled = on;
-   this.workersControl.enabled = on && this.ext.ready;
-   if (!on) { this.scannerStatus.text = "Built-in scanner: one frame at a time, on one core."; return; }
-   this.scannerStatus.text = this.ext.message;
-};
-
-SweeperDialog.prototype.probeExternal = function () {
-   // Finds Python and the command-line script, then asks the latter what the
-   // machine allows (CPU threads, memory): sets the range of the Workers slider.
-   this.ext.ready = false;
-   this.scannerStatus.text = "Checking Python...";
-   processEvents();
-   var py = findPython(this.pythonEdit.text.trim());
-   if (!py) {
-      this.ext.message = "<font color=\"#c03030\">Python 3 not found.</font> Install it, or give its path; "
-         + "meanwhile the built-in single-core scan is used. (" + findPython.lastError.substring(0, 300) + ")";
-      console.warningln("StarlinkSweeper: Python not found: " + findPython.lastError);
-      this.updateScannerUi(); return;
-   }
-   if (!py.deps) {
-      this.ext.message = "<font color=\"#c03030\">Python " + py.version + " found, but numpy, scipy or astropy is missing.</font>"
-         + " Install them once: <i>sudo apt install python3-numpy python3-scipy python3-astropy</i> on Debian or Ubuntu, "
-         + "<i>" + py.prog + " -m pip install numpy scipy astropy</i> elsewhere, or a virtual environment given in the Python field. "
-         + "Meanwhile the built-in single-core scan is used.";
-      this.updateScannerUi(); return;
-   }
-   var cli = findCli(this.cliEdit.text.trim());
-   if (!cli.length) {
-      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " not found.</font> It is installed with this script "
-         + "under src/scripts/StarlinkSweeper/; otherwise locate it with the button.";
-      this.updateScannerUi(); return;
-   }
-   var pfile = tempFile("probe");
-   var args = py.pre.concat([cli, "--probe", "--out", pfile]);
-   if (this.folder.length) args.push(this.folder);
-   var r = runCapture(py.prog, args, 60000);
-   var text = readWholeFile(pfile).trim();
-   removeFile(pfile);
-   if (!text.length) text = r.out.trim().split("\n").pop() || "";
-   var info = null;
-   try { info = JSON.parse(text); } catch (e) { info = null; }
-   if (!r.ok || !info) {
-      this.ext.message = "<font color=\"#c03030\">" + CLI_NAME + " did not answer:</font> " + (r.err || r.out || "no output").trim().substring(0, 200);
-      this.updateScannerUi(); return;
-   }
-   this.ext.python = py; this.ext.cli = cli;
-   this.ext.maxWorkers = Math.max(1, info.max_workers | 0);
-   this.ext.suggested = Math.max(1, Math.min(info.suggested_workers | 0, this.ext.maxWorkers));
-   this.workersControl.setRange(1, this.ext.maxWorkers);
-   this.workersControl.slider.setRange(1, this.ext.maxWorkers);
-   if (this.workers < 1 || this.workers > this.ext.maxWorkers) this.workers = this.ext.suggested;
-   this.workersControl.setValue(this.workers);
-   this.ext.ready = true;
-   this.ext.message = format("Python %s, %s %s. This machine allows up to <b>%d</b> workers (%d CPU threads, %s available), suggested %d.",
-                             py.version, CLI_NAME, info.version, this.ext.maxWorkers, info.cpus | 0,
-                             info.available_gb != null ? format("%.1f GB", info.available_gb) : "memory unknown",
-                             this.ext.suggested)
-      + "<br>Using " + cli;
-   if (String(info.version) != VERSION)
-      this.ext.message += "<br><font color=\"#c03030\"><b>Version mismatch:</b> this script is " + VERSION + ", that "
-         + CLI_NAME + " is " + info.version + ". Clear the Script field to use the copy installed with this script, "
-         + "or update the one you point to.</font>";
-   this.updateScannerUi();
-};
-
-SweeperDialog.prototype.addExternalRecord = function (rec) {
-   // One '#JSON' line of the command-line scanner -> one result (preview built on demand).
-   var r = { file: rec.file, status: rec.status || "", lines: [], preview: null, score: -1, coarse: 0 };
-   if (r.status == "error") { r.error = rec.error || "error"; }
-   else if (r.status == "skipped") { r.skipped = rec.skipped || "other"; }
-   else {
-      r.score = Number(rec.score) || 0; r.coarse = Number(rec.coarse) || 0;
-      r.width = rec.width | 0; r.height = rec.height | 0; r.seconds = Number(rec.seconds) || 0;
-      for (var i = 0; i < (rec.lines || []).length; ++i) {
-         var L = rec.lines[i];
-         r.lines.push({ score: Number(L.score), angle: Number(L.angle), run: L.run | 0,
-                        x0: L.x0 | 0, y0: L.y0 | 0, x1: L.x1 | 0, y1: L.y1 | 0 });
-      }
-   }
-   this.results.push(r);
-   return r;
-};
-
-SweeperDialog.prototype.ensurePreview = function (r) {
-   // Results of the external scanner carry no preview: read and normalise the
-   // frame when it is first shown (no line search, well under a second).
-   if (r.preview || r.status == "skipped" || r.status == "error") return;
-   try {
-      var b = readBinnedImage(r.file, false);
-      var norm = normalise(b.data, b.w, b.h);
-      r.preview = norm.preview; r.pw = b.w; r.ph = b.h;
-      if (!r.width) { r.width = b.W; r.height = b.H; }
-   } catch (e) {
-      console.warningln("Preview of " + r.file + ": " + e.message);
-   }
-};
-
-SweeperDialog.prototype.scanExternal = function (files) {
-   var self = this, py = this.ext.python, t0 = Date.now();
-   var progress = tempFile("progress");
-   var args = py.pre.concat(["-u", this.ext.cli, this.folder, "-t", format("%.1f", this.threshold),
-                             "-j", String(Math.max(1, this.workers)), "-o", File.systemTempDirectory + "/StarlinkSweeper_last.csv",
-                             "--progress-file", progress]);
-   if (this.recursiveCheck.checked) args.push("-r");
-   if (!this.lightsOnlyCheck.checked) args.push("--all-types");
-   console.writeln("Running " + py.prog + " " + args.join(" "));
-   var p = new ExternalProcess;
-   var counts = { done: 0, flagged: 0, skipped: 0, scanned: 0 }, stopped = false, buf = "", consumed = 0;
-   var pollProgress = function () {
-      // the scanner appends one '#JSON' record per frame; take the new ones
-      var lines;
-      try { lines = File.exists(progress) ? File.readLines(progress) : []; } catch (e) { return; }
-      for (; consumed < lines.length; ++consumed)
-         if (lines[consumed].indexOf("#JSON ") == 0) handleLine(lines[consumed]);
-   };
-   var handleLine = function (line) {
-      line = line.replace(/\r$/, "");
-      if (!line.length) return;
-      if (line.indexOf("#JSON ") == 0) {
-         var rec = null;
-         try { rec = JSON.parse(line.substring(6)); } catch (e) { rec = null; }
-         if (!rec) return;
-         var r = self.addExternalRecord(rec);
-         ++counts.done;
-         if (r.status == "skipped") ++counts.skipped;
-         else if (r.status != "error") { ++counts.scanned; if (r.score >= self.threshold) ++counts.flagged; }
-         self.progressLabel.text = format("Scanning %d / %d  (%d listed, %d skipped)  %s", counts.done, files.length,
-                                          counts.flagged, counts.skipped, shortName(r.file, 48));
-         self.rebuildList();
-         return;
-      }
-      console.writeln(line);
-   };
-   try {
-      p.start(py.prog, args);
-      if (!p.waitForStarted(10000)) throw new Error("could not start " + py.prog);
-      while (p.isRunning) {
-         processEvents();
-         if (this.stopRequested || console.abortRequested) { stopped = true; try { p.kill(); } catch (e) { } break; }
-         pollProgress();
-         var chunk = processStream(p, "out");            // console echo only, best effort
-         if (chunk.length) {
-            buf += chunk;
-            var parts = buf.split("\n");
-            buf = parts.pop();
-            for (var i = 0; i < parts.length; ++i) if (parts[i].indexOf("#JSON ") != 0) handleLine(parts[i]);
-         }
-         pause(0.2);
-      }
-      pollProgress();
-      if (!stopped) {
-         var err = processStream(p, "err").trim();
-         if (p.exitCode != 0) console.criticalln("Scanner exit code " + p.exitCode + (err.length ? ": " + err.substring(0, 500) : ""));
-         else if (err.length) console.warningln(err.substring(0, 500));
-      }
-   } catch (e) {
-      console.criticalln("External scanner: " + e.message);
-      try { if (p.isRunning) p.kill(); } catch (e2) { }
-   }
-   removeFile(progress);
-   return { stopped: stopped, scanned: counts.scanned, flagged: counts.flagged, skipped: counts.skipped, seconds: (Date.now() - t0) / 1000 };
-};
-
-SweeperDialog.prototype.scan = function () {
+scan() {
    var self = this;
    if (this.scanning) return;
    if (!this.folder.length || !File.directoryExists(this.folder)) {
-      new MessageBox("Please select the folder of your light frames first.", TITLE, StdIcon_Warning, StdButton_Ok).execute();
+      new MessageBox("Please select the folder of your light frames first.", TITLE, StdIcon.Warning, StdButton.Ok).execute();
       return;
    }
-   writeSetting("folder", DataType_String, this.folder);
+   writeSetting("folder", DataType.String, this.folder);
    var files = listFrames(this.folder, this.recursiveCheck.checked);
    if (files.length == 0) {
-      new MessageBox("No FITS / XISF file found in\n" + this.folder, TITLE, StdIcon_Warning, StdButton_Ok).execute();
+      new MessageBox("No FITS / XISF file found in\n" + this.folder, TITLE, StdIcon.Warning, StdButton.Ok).execute();
       return;
    }
    this.results = [];
@@ -1267,52 +1051,42 @@ SweeperDialog.prototype.scan = function () {
    this.scanButton.enabled = false; this.stopButton.enabled = true;
    console.show();
    console.abortEnabled = true;
-   console.writeln("<end><cbr><b>" + TITLE + " " + VERSION + "</b>: " + files.length + " frames in " + this.folder);
-   var t0 = Date.now(), flagged = 0, skipped = 0, scanned = 0, lightsOnly = this.lightsOnlyCheck.checked;
-   var stopped = false;
-   abortRequested = function () { return self.stopRequested || console.abortRequested; };
-   var external = this.externalCheck.checked;
-   if (external && !this.ext.ready) this.probeExternal();
-   if (external && !this.ext.ready) {
-      console.warningln("Parallel scanner not available (" + this.ext.message.replace(/<[^>]*>/g, "") + "): using the built-in scanner.");
-      external = false;
-   }
-   if (external) {
-      var ext = this.scanExternal(files);
-      stopped = ext.stopped; scanned = ext.scanned; flagged = ext.flagged; skipped = ext.skipped;
-   } else
-   for (var k = 0; k < files.length; ++k) {
-      this.progressLabel.text = format("Scanning %d / %d  (%d listed, %d skipped)  %s", k + 1, files.length,
-                                       flagged, skipped, shortName(files[k], 48));
-      processEvents();
-      if (abortRequested()) { stopped = true; break; }
-      if (verboseLog) { console.writeln(format("<end><cbr>[%d/%d] %s", k + 1, files.length, files[k])); console.flush(); }
-      try {
-         var res = analyseFile(files[k], lightsOnly);
-         if (res.skipped) {
-            ++skipped;
-            this.results.push(res);
-            console.writeln(format("[%d/%d] %s  skipped (%s)", k + 1, files.length,
-                                   File.extractNameAndExtension(files[k]), res.skipped.toUpperCase()));
-            continue;
-         }
+   var threads = scanThreads(files, this.threads);
+   console.writeln("<end><cbr><b>" + TITLE + " " + VERSION + "</b>: " + files.length + " frames in " + this.folder
+                   + (threads > 1 ? ", " + threads + " at a time" : ""));
+   var t0 = Date.now(), flagged = 0, skipped = 0, scanned = 0, done = 0, lightsOnly = this.lightsOnlyCheck.checked;
+   this.progressLabel.text = format("Scanning %d frames...", files.length);
+   var stopped = scanFiles(files, lightsOnly, threads, function (k, res) {
+      ++done;
+      var name = File.extractNameAndExtension(files[k]);
+      if (res.error) {
+         console.criticalln(format("[%d/%d] %s: %s", done, files.length, files[k], res.error));
+         self.results.push({ file: files[k], score: -1, lines: [], error: res.error, status: "error", preview: null });
+      } else if (res.skipped) {
+         ++skipped;
+         self.results.push(res);
+         console.writeln(format("[%d/%d] %s  skipped (%s)", done, files.length, name, res.skipped.toUpperCase()));
+      } else {
          res.status = "";
-         this.results.push(res);
+         self.results.push(res);
          ++scanned;
-         var tag = res.score >= this.threshold ? format("TRAIL x%d", this.shownLines(res).length) : "ok";
-         if (res.score >= this.threshold) ++flagged;
-         console.writeln(format("[%d/%d] %s  score %.1f  %.1fs  %s", k + 1, files.length,
-                                File.extractNameAndExtension(files[k]), res.score, res.seconds, tag));
-      } catch (e) {
-         if (e.message == "__abort__") { stopped = true; break; }
-         console.criticalln("[" + (k + 1) + "/" + files.length + "] " + files[k] + ": " + e.message);
-         this.results.push({ file: files[k], score: -1, lines: [], error: e.message, status: "error", preview: null });
+         var tag = res.score >= self.threshold ? format("TRAIL x%d", self.shownLines(res).length) : "ok";
+         if (res.score >= self.threshold) ++flagged;
+         console.writeln(format("[%d/%d] %s  score %.1f  %.1fs  %s", done, files.length, name, res.score, res.seconds, tag));
       }
-      this.rebuildList();
-   }
-   abortRequested = null;
+      self.progressLabel.text = format("Scanning %d / %d  (%d listed, %d skipped)  %s", done, files.length,
+                                       flagged, skipped, shortName(files[k], 48));
+      self.rebuildList();
+      CoreApplication.processEvents();
+   }, function () { return self.stopRequested || console.abortRequested; });
    if (stopped) console.warningln("Scan stopped by user after " + this.results.length + " of " + files.length + " frames");
+   // results arrive in any order with threads: back to the order of the files
+   var current = this.tree.currentNode ? this.results[this.tree.currentNode.resultIndex].file : null;
+   this.results.sort(function (a, b) { return a.file < b.file ? -1 : (a.file > b.file ? 1 : 0); });
+   this.tree.clear();
    this.rebuildList();
+   for (var n = 0; current && n < this.tree.numberOfChildren; ++n)
+      if (this.results[this.tree.child(n).resultIndex].file == current) { this.tree.currentNode = this.tree.child(n); break; }
    this.scanning = false;
    this.scanButton.enabled = true; this.stopButton.enabled = false;
    var cur = this.tree.currentNode;
@@ -1321,39 +1095,30 @@ SweeperDialog.prototype.scan = function () {
                                     stopped ? "Stopped. " : "", scanned, (Date.now() - t0) / 1000, flagged,
                                     this.threshold, skipped);
    console.writeln(this.progressLabel.text);
-};
+}
 
-SweeperDialog.prototype.saveSettings = function () {
-   writeSetting("alert", DataType_Double, this.alert);
-   writeSetting("recursive", DataType_Boolean, this.recursiveCheck.checked);
-   writeSetting("lightsOnly", DataType_Boolean, this.lightsOnlyCheck.checked);
-   writeSetting("external", DataType_Boolean, this.externalCheck.checked);
-   writeSetting("pythonPath", DataType_String, this.pythonEdit.text.trim());
-   writeSetting("cliPath", DataType_String, this.cliEdit.text.trim());
-   writeSetting("workers", DataType_Int32, this.workers);
-   if (this.folder.length) writeSetting("folder", DataType_String, this.folder);
-};
+saveSettings() {
+   writeSetting("alert", DataType.Double, this.alert);
+   writeSetting("recursive", DataType.Boolean, this.recursiveCheck.checked);
+   writeSetting("lightsOnly", DataType.Boolean, this.lightsOnlyCheck.checked);
+   writeSetting("threads", DataType.Int32, this.threads);
+   if (this.folder.length) writeSetting("folder", DataType.String, this.folder);
+}
 
-SweeperDialog.prototype.resetSettings = function () {
+resetSettings() {
    removeSettings();
    this.alert = DEFAULT_ALERT;
    this.alertControl.setValue(this.alert);
    this.recursiveCheck.checked = true;
    this.lightsOnlyCheck.checked = true;
-   this.externalCheck.checked = false;
-   this.pythonEdit.text = "";
-   this.cliEdit.text = "";
-   this.workers = 0;
-   this.ext = { python: null, cli: "", maxWorkers: 1, suggested: 1, ready: false, message: "not checked yet" };
-   this.workersControl.setRange(1, 64);
-   this.workersControl.slider.setRange(1, 64);
-   this.workersControl.setValue(1);
+   this.threads = 0;
+   this.threadsSpin.value = 0;
    this.updateScannerUi();
    this.rebuildList();
    console.writeln(TITLE + ": settings reset to defaults.");
-};
+}
 
-SweeperDialog.prototype.rebuildList = function () {
+rebuildList() {
    var current = this.tree.currentNode ? this.tree.currentNode.resultIndex : -1;
    this.tree.clear();
    var order = [];
@@ -1381,7 +1146,7 @@ SweeperDialog.prototype.rebuildList = function () {
       node.setText(4, r.status);
       node.setText(5, File.extractNameAndExtension(r.file));
       node.setToolTip(5, r.file);
-      for (var c = 0; c < 4; ++c) node.setAlignment(c, TextAlign_Right);
+      for (var c = 0; c < 4; ++c) node.setAlignment(c, TextAlignment.Right);
       if (r.score >= this.alert) {
          for (var c3 = 0; c3 < 6; ++c3) {
             try { node.setTextColor(c3, 0xFFD02020); } catch (e) { }
@@ -1393,9 +1158,9 @@ SweeperDialog.prototype.rebuildList = function () {
    for (var c2 = 0; c2 < 6; ++c2) this.tree.adjustColumnWidthToContents(c2);
    if (again) { this.tree.currentNode = again; this.showPreview(again.resultIndex); }
    else this.showPreview(-1);
-};
+}
 
-SweeperDialog.prototype.buildBitmap = function (r) {
+buildBitmap(r) {
    var w = r.pw, h = r.ph, bmp = new Bitmap(w, h), p = r.preview;
    for (var y = 0; y < h; ++y)
       for (var x = 0; x < w; ++x) {
@@ -1412,22 +1177,22 @@ SweeperDialog.prototype.buildBitmap = function (r) {
    }
    g.end();
    return bmp;
-};
+}
 
-SweeperDialog.prototype.setBitmap = function (bmp, index) {
+setBitmap(bmp, index) {
    this.bitmap = bmp; this.bitmapIndex = index; this.bitmapThreshold = this.threshold;
    this.preview.update();
-};
+}
 
-SweeperDialog.prototype.shownLines = function (r) {
+shownLines(r) {
    // Lines are kept down to the internal floor; only those at or above the
    // listing level are shown.
    var out = [];
    for (var i = 0; i < r.lines.length; ++i) if (r.lines[i].score >= this.threshold) out.push(r.lines[i]);
    return out;
-};
+}
 
-SweeperDialog.prototype.summaryText = function () {
+summaryText() {
    // What the info line shows when no frame is selected: live counts.
    var scanned = 0, above = 0, red = 0, skipped = 0, errors = 0, done = 0;
    for (var i = 0; i < this.results.length; ++i) {
@@ -1447,10 +1212,9 @@ SweeperDialog.prototype.summaryText = function () {
    if (done) t += format(", %d quarantined or erased", done);
    t += this.scanning ? " (scan in progress)" : ". Select a frame to see its trails.";
    return t;
-};
+}
 
-SweeperDialog.prototype.showPreview = function (index) {
-   if (index >= 0 && index < this.results.length) this.ensurePreview(this.results[index]);
+showPreview(index) {
    if (index < 0 || index >= this.results.length || !this.results[index].preview) {
       this.setBitmap(null, -1); this.previewInfo.text = this.summaryText(); return;
    }
@@ -1467,24 +1231,24 @@ SweeperDialog.prototype.showPreview = function (index) {
    }
    if (r.status.length) info += "<br><i>" + r.status + "</i>";
    this.previewInfo.text = info;
-};
+}
 
-SweeperDialog.prototype.actOnCurrent = function (action) {
+actOnCurrent(action) {
    var node = this.tree.currentNode;
    if (!node) return;
    var r = this.results[node.resultIndex];
    if (r.status == "quarantined" || r.status == "erased") {
-      new MessageBox("This frame has already been " + r.status + ".", TITLE, StdIcon_Information, StdButton_Ok).execute();
+      new MessageBox("This frame has already been " + r.status + ".", TITLE, StdIcon.Information, StdButton.Ok).execute();
       return;
    }
    if (!File.exists(r.file)) {
-      new MessageBox("File not found:\n" + r.file, TITLE, StdIcon_Error, StdButton_Ok).execute();
+      new MessageBox("File not found:\n" + r.file, TITLE, StdIcon.Error, StdButton.Ok).execute();
       return;
    }
    if (action == "erase") {
       var answer = new MessageBox("Permanently delete this frame?\n\n" + r.file + "\n\nThis cannot be undone.",
-                                  TITLE, StdIcon_Warning, StdButton_Yes, StdButton_No).execute();
-      if (answer != StdButton_Yes) return;
+                                  TITLE, StdIcon.Warning, StdButton.Yes, StdButton.No).execute();
+      if (answer != StdButton.Yes) return;
       File.remove(r.file);
       r.status = "erased";
       console.writeln("Erased " + r.file);
@@ -1493,9 +1257,9 @@ SweeperDialog.prototype.actOnCurrent = function (action) {
    }
    this.rebuildList();
    this.showPreview(node.resultIndex);
-};
+}
 
-SweeperDialog.prototype.quarantine = function (r) {
+quarantine(r) {
    // Moves the frame to <quarantine root>/<its sub-path under the scanned folder>,
    // the quarantine root being next to the scanned folder (see quarantineRoot).
    var root = normalizedDir(this.folder), qroot = quarantineRoot(root);
@@ -1508,9 +1272,9 @@ SweeperDialog.prototype.quarantine = function (r) {
    r.status = "quarantined";
    r.movedTo = dst;
    console.writeln("Moved " + r.file + " -> " + dst);
-};
+}
 
-SweeperDialog.prototype.quarantineAll = function (redOnly) {
+quarantineAll(redOnly) {
    var todo = [], level = redOnly ? Math.max(this.alert, this.threshold) : this.threshold;
    for (var i = 0; i < this.results.length; ++i) {
       var r = this.results[i];
@@ -1519,27 +1283,27 @@ SweeperDialog.prototype.quarantineAll = function (redOnly) {
    if (!todo.length) return;
    var answer = new MessageBox(format("Move %d %sframe(s) to\n%s ?", todo.length,
                                       redOnly ? "red " : "", quarantineRoot(this.folder)),
-                               TITLE, StdIcon_Question, StdButton_Yes, StdButton_No).execute();
-   if (answer != StdButton_Yes) return;
+                               TITLE, StdIcon.Question, StdButton.Yes, StdButton.No).execute();
+   if (answer != StdButton.Yes) return;
    for (var k = 0; k < todo.length; ++k) {
       try { this.quarantine(todo[k]); }
       catch (e) { console.criticalln(e.message); }
    }
    this.rebuildList();
-};
+}
 
-SweeperDialog.prototype.openInPixInsight = function (index) {
+openInPixInsight(index) {
    if (index < 0 || index >= this.results.length) return;
    var r = this.results[index], path = r.movedTo || r.file;
    if (!File.exists(path)) {
-      new MessageBox("File not found:\n" + path, TITLE, StdIcon_Error, StdButton_Ok).execute();
+      new MessageBox("File not found:\n" + path, TITLE, StdIcon.Error, StdButton.Ok).execute();
       return;
    }
    var windows = ImageWindow.open(path);
    if (windows.length) { windows[0].show(); windows[0].zoomToFit(); }
-};
+}
 
-SweeperDialog.prototype.exportCSV = function () {
+exportCSV() {
    if (!this.results.length) return;
    var sfd = new SaveFileDialog;
    sfd.caption = "StarlinkSweeper: save CSV report";
@@ -1562,7 +1326,9 @@ SweeperDialog.prototype.exportCSV = function () {
    }
    File.writeTextFile(sfd.fileName, text);
    console.writeln("Report written to " + sfd.fileName);
-};
+}
+
+}
 
 // --------------------------------------------------------------------- main
 function main() {
@@ -1571,4 +1337,5 @@ function main() {
    dialog.execute();
 }
 
-main();
+if (typeof STARLINKSWEEPER_NO_MAIN === "undefined")
+   main();

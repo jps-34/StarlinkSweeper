@@ -33,7 +33,8 @@ l'intégration. StarlinkSweeper la trouve.
    binnée, son fond soustrait, puis parcourue à la recherche de lignes droites dans toutes les
    directions. Les flats, darks et bias présents dans l'arborescence sont reconnus à leur en-tête
    et ignorés : le dossier d'une nuit entière se scanne tel quel. Compter quelques secondes par
-   brute de 60 Mpx.
+   brute de 60 Mpx et par processeur : avec PixInsight 1.9.5, les brutes sont analysées en
+   parallèle (voir *Scan parallèle*).
 2. **Liste.** Les brutes dont la meilleure traînée atteint un score de 20 sont listées, la plus
    forte en premier, avec l'angle de la traînée et la fraction du champ qu'elle couvre ; à partir du
    niveau réglable *Red above*, elles passent en rouge. Un train Starlink apparaît comme plusieurs
@@ -57,22 +58,18 @@ scannés.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` (1.1.5) | 1.9.4 et suivants |
+| `scripts/StarlinkSweeper.js` | 1.9.4 et suivants (1.9.5 pour le scan parallèle) |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
-La version en ligne de commande, `python/starlinksweeper.py`, nécessite Python 3 avec `numpy`,
-`scipy` et `astropy`, à installer une fois :
+La version en ligne de commande, `python/starlinksweeper.py`, est un outil à part, pour traiter des
+lots hors de PixInsight ; le script n'en a pas besoin. Elle nécessite Python 3 avec `numpy`, `scipy`
+et `astropy`, à installer une fois :
 
 * Debian, Ubuntu et dérivés : `sudo apt install python3-numpy python3-scipy python3-astropy`
   (pip refuse d'écrire dans le Python système) ;
 * Windows, macOS, autres Linux : `pip install numpy scipy astropy` (ou `py -3 -m pip ...`) ;
-* ou un environnement virtuel : `python3 -m venv <dossier> && <dossier>/bin/pip install numpy scipy astropy`,
-  puis indiquer `<dossier>/bin/python` dans le champ *Python* de la fenêtre.
-
-Elle traite plusieurs brutes en parallèle, et le script PixInsight peut lui déléguer son scan (voir
-*Scan parallèle*) : le moteur JavaScript de PixInsight est mono-thread, c'est ainsi qu'un gros lot
-profite de tous les cœurs. **Sans Python, le script fonctionne quand même**, sur un cœur.
+* ou un environnement virtuel : `python3 -m venv <dossier> && <dossier>/bin/pip install numpy scipy astropy`.
 
 ## Installation
 
@@ -109,17 +106,12 @@ ressort loin au-dessus des autres.
 
 ## Scan parallèle
 
-Le cadre *Scanner* de la fenêtre propose **Parallel scan with Python**. Coché, le scan est confié à
-la version en ligne de commande livrée avec le script (installée à côté, même algorithme, mêmes
-scores), qui traite plusieurs brutes à la fois ; les résultats arrivent dans la liste au fil de
-l'eau, et la vérification, l'aperçu, la quarantaine et l'effacement restent dans la fenêtre. Il faut
-Python 3 avec `numpy`, `scipy` et `astropy` ; le cadre indique ce qu'il a trouvé, et **Detect**
-revérifie après une installation.
-
-Le curseur **Workers** monte jusqu'à ce que la machine autorise : ses threads CPU, plafonnés par la
-mémoire disponible (environ 100 Mo plus 5 octets par pixel et par worker). La valeur suggérée
-laisse un thread libre. Sans Python, ou décoché, le scan tourne dans PixInsight sur un cœur, une
-brute à la fois.
+Avec PixInsight 1.9.5 et suivants, les brutes sont analysées en parallèle dans PixInsight, une par
+thread, et les résultats arrivent dans la liste au fil de l'eau ; les scores sont les mêmes qu'une
+brute à la fois. **Threads**, dans le cadre *Scanner* : **Auto** (par défaut) utilise autant de
+threads que de processeurs permis dans les préférences de PixInsight, moins si la mémoire disponible
+manque (chaque thread garde une brute en mémoire) ; **1** analyse une brute à la fois. Avec
+PixInsight 1.9.4, le scan se fait une brute à la fois. Rien à installer.
 
 ## Réglages
 
@@ -129,13 +121,13 @@ brute à la fois.
 | **Include sub-folders** | Scan récursif (coché par défaut). Les dossiers de quarantaine (noms finissant par `_trails`) sont ignorés. |
 | **Lights only** | Coché par défaut : les fichiers dont l'en-tête `IMAGETYP` (ou `FRAME`, `FRAMETYP`) indique flat, dark ou bias sont ignorés et notés comme tels dans le rapport CSV. Les fichiers sans ce mot-clé sont scannés. Décocher pour tout scanner. |
 | **Red above** | Les brutes dont la meilleure traînée atteint ce score sont affichées en rouge : une traînée aussi forte n'est jamais une fausse alerte, **Quarantine red** les déplace toutes d'un coup. Les brutes entre le niveau de liste et cette valeur méritent un coup d'œil à l'aperçu. Le changer recolore la liste sans relancer le scan. |
-| **Parallel scan with Python**, **Python**, **Script**, **Workers** | Voir *Scan parallèle*. Les chemins de Python et du script peuvent rester vides (recherche dans le PATH et à côté du script installé). |
+| **Threads** | Brutes analysées en même temps ; voir *Scan parallèle*. |
 
 Brutes et lignes sont listées à partir d'un score fixe de 20. Le score est une significativité en
 unités du bruit de la brute elle-même (voir *Comment ça marche*), donc ce niveau ne dépend ni du
 temps de pose, ni du gain, ni de la caméra : une brute propre reste loin dessous, une traînée
-visible arrive plusieurs fois au-dessus. Niveau rouge, options du scanner, workers et dernier
-dossier sont mémorisés d'une session à l'autre ; le bouton **Reset** (en bas à gauche, à la manière
+visible arrive plusieurs fois au-dessus. Niveau rouge, options, threads et dernier dossier sont
+mémorisés d'une session à l'autre ; le bouton **Reset** (en bas à gauche, à la manière
 de PixInsight) les oublie tous et rétablit les valeurs par défaut.
 
 Quel que soit le niveau, regarder l'aperçu avant d'effacer.
