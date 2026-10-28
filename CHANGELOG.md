@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 (2026-10-28)
+* **SNR-preserving masking option for WBPP** (`StarlinkSweeper-WBPP.js`, a WBPP event script):
+  instead of setting a frame aside, WBPP keeps it and only the pixels of its trails are left out of
+  the integration, so the signal-to-noise ratio of the master is almost untouched (the quarantine
+  loses the whole frame). Available for now only through a WBPP integration.
+  Right after registration, every registered light frame is scanned in every direction; each trail
+  (each member of a Starlink train separately) is masked with its wings, the masked pixels are set
+  to 0 and WBPP's integration rejects them. One compressed mask file per masked frame, a coverage
+  map, CSV reports and a log in `<WBPP output>/StarlinkSweeper/`. The quarantine of the dialog is
+  unchanged.
+* The mask geometry (trail width, ends, drawing) comes from ClarkeMask: `StarlinkSweeperMaskCore.js`
+  is a copy of its core.
+* The scan of registered frames leaves out their registration borders (pixels at 0), whose edges
+  were taken for horizontal and vertical lines and hid faint trails. The scan of the dialog, on
+  unregistered frames, is unchanged (same scores to the bit).
+* Dialog: a *Masking in WBPP (recommended)* box explains why masking is better than quarantine (the
+  signal-to-noise ratio of the master is almost untouched) and gives the path of the event script to
+  select in WBPP.
+* Interface in English or French (*Langue / Language* list), remembered, the language of the system
+  by default; the window reopens in the chosen language with the results of the scan kept. The
+  console and the CSV report stay in English.
+* README (English and French): an *UPDATE 1.3.0* banner at the top announces the SNR-preserving
+  masking.
+* The command-line Python version (`python/starlinksweeper.py`) is removed from the repository: the
+  parallel scan of the dialog and the masking in WBPP cover its uses, with nothing to install. Its
+  last version stays available in the history (tag `v1.2.2`).
+* Code: the detection core (parameters, analysis of a frame, file reading, parallel scan) moves
+  from `scripts/StarlinkSweeper.js` to `scripts/StarlinkSweeperCore.js`. A manual installation
+  needs all the files of `scripts/`.
+
 ## 1.2.2 (2026-10-27)
 * Menu: the script moves from *Script > Utilities* to *Script > JPS*, the folder that groups
   the PixInsight scripts of Jacques Pouyaud. No change to the behaviour.

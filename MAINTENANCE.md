@@ -6,11 +6,17 @@ Notes for the author. Nothing here is needed to use the script.
 
 | Path | Role |
 |---|---|
-| `scripts/StarlinkSweeper.js` | the PixInsight script, **only source to edit** for the script |
-| `python/starlinksweeper.py` | command-line version, same algorithm and constants as the script; a separate tool for batch use outside PixInsight, not packed into the update archive |
+| `scripts/StarlinkSweeper.js` | the PixInsight script: dialog, quarantine, settings; includes the core below |
+| `scripts/StarlinkSweeperCore.js` | detection core of the script: parameters, numeric analysis, file reading, parallel scan. No `#include` and only top-level `var` / `function` declarations, so that a WBPP event script can load it with an indirect `eval` |
 | `tests/make_synthetic_subs.py` | generates the synthetic validation frames (a few GB, a few minutes) |
 | `tests/run_scan_pi.js` | runs the analysis of the script on a list of frames inside PixInsight, without the dialog: one JSON line per frame |
 | `tests/compare_scans.py` | compares two runs of `run_scan_pi.js`, field by field |
+| `scripts/StarlinkSweeper-WBPP.js` | WBPP event script of the masking option (no menu entry) |
+| `scripts/StarlinkSweeperMaskEngine.js` | masking engine: detection per registered frame, masks, in-place save, coverage, threads |
+| `scripts/StarlinkSweeperMaskCore.js` | copy of ClarkeMask's `ClarkeMaskCore.js` (only the factory and namespace renamed): trail width, ends, mask drawing |
+| `tests/run_mask_pi.js` | runs the masking engine on registered frames outside WBPP (dry run or in place, serial or threads) |
+| `tests/compare_mask_runs.py` | compares two runs of `run_mask_pi.js` (reports and mask pixels) |
+| `tests/probe_mask_pi.js` | development probe: scan lines and ClarkeMask detection per direction, one JSON line per frame |
 | `tools/build_repo.py` | builds the PixInsight update repository into `docs/` |
 | `docs/` | served by GitHub Pages: `index.html`, `updates.xri`, the script archive, `.nojekyll` |
 | `README.md`, `README.fr.md` | English and French documentation, each linking to the other |
@@ -57,18 +63,17 @@ References: *The PixInsight Code Signing System*, installed with PixInsight unde
 
 ## 4. Release of a version
 
-Keep `scripts/StarlinkSweeper.js` and `python/starlinksweeper.py` in step: the detection constants
-at the top of both files must stay identical, so that both give the same scores. `VERSION` lives in
-both files as well.
+`VERSION` lives in `scripts/StarlinkSweeper.js` and in `scripts/StarlinkSweeperMaskEngine.js` (written
+in the HISTORY keyword of the masked frames).
 
-1. On a `dev/<topic>` branch of the forge: set `VERSION` in both files, add the version line in the
+1. On a `dev/<topic>` branch of the forge: set `VERSION` in those files, add the version line in the
    header of the script, add the CHANGELOG section, then build the update repository:
 
    ```bash
    python3 tools/build_repo.py --user jps-34
    ```
 
-   With signing (later), order matters: sign `scripts/StarlinkSweeper.js` with **CodeSign**, run
+   With signing (later), order matters: sign the five `scripts/*.js` files with **CodeSign**, run
    `tools/build_repo.py`, sign `docs/updates.xri` last, then commit.
 2. Pull request on the forge; after the merge into `main`, tag the merge commit:
 
@@ -86,16 +91,73 @@ Test of a development version in PixInsight: *Script > Execute Script File*, pic
 `scripts/StarlinkSweeper.js` in the local clone. The script runs without being installed; the
 installed version stays in place.
 
-## 5. Validating a change to the detector
+## 5. Masking option (WBPP event script)
+
+Loading. In WBPP, `StarlinkSweeper-WBPP.js` evaluates `StarlinkSweeperCore.js` **inside a function**
+and keeps only the `StarlinkSweeperScan` object it ends with: the core declares many top-level
+names (`background`, `normalise`, `stage`, ...) that must not land in WBPP's global scope.
+`StarlinkSweeperMaskCore.js` and `StarlinkSweeperMaskEngine.js` define one namespace each and are
+evaluated globally. The dialog simply `#include`s the core.
+
+Threads. A detection thread is built from `StarlinkSweeperScan.coreSource()` (the constants and
+functions listed in `coreSource()`, also used by the scan of the dialog), the source of
+`StarlinkSweeperMaskCoreFactory`, and the helpers listed in the engine's `threadSource()`. A
+function used by the detection must be listed there; the threaded run of `tests/run_mask_pi.js`
+reveals a missing one.
+
+The default scan must stay unchanged: the masking-only behaviour (no-data bins, no cap on the
+lines) is reached through optional arguments of `normalise()` / `analyseBinned()`. After any change
+to the core, rerun `tests/run_scan_pi.js` against the previous version (section 6, step 3).
+
+Refreshing the mask core from ClarkeMask: copy `scripts/ClarkeMaskCore.js`, rename
+`ClarkeMaskCoreFactory` and `ClarkeMaskCore` to `StarlinkSweeperMaskCoreFactory` and
+`StarlinkSweeperMaskCore`, keep the header, update the commit in it. StarlinkSweeper only calls
+`binMean2()`, `detect()` and `rasterize()`.
+
+Validation of a change to the masking:
+
+1. Registered frames: run WBPP once without event script (registration only is enough), keep its
+   `registered/` folder.
+2. Dry runs, serial and threaded, then compare (identical reports and mask pixels):
+
+   ```bash
+   PixInsight.sh -n --automation-mode --no-startup-scripts \
+     -r="<clone>/tests/run_mask_pi.js,<out_1>,dry,1,<frame1>,<frame2>,..." --force-exit
+   PixInsight.sh -n --automation-mode --no-startup-scripts \
+     -r="<clone>/tests/run_mask_pi.js,<out_auto>,dry,0,<frame1>,<frame2>,..." --force-exit
+   python3 -I tests/compare_mask_runs.py <out_1> <out_auto>
+   ```
+
+   Every frame with a visible trail must be masked, clean frames not; check the masks on a preview.
+3. A headless WBPP run with the event script (paths without commas):
+
+   ```bash
+   PixInsight.sh -n --automation-mode --no-startup-scripts \
+     -r="<PixInsight>/src/scripts/BatchPreprocessing/WBPP.js,automationMode=true,dir=<lights>,\
+   outputDirectory=<output>,localNormalization=true,integrate=true,usePipelineScript=true,\
+   pipelineScriptFile=<clone>/scripts/StarlinkSweeper-WBPP.js" --force-exit
+   ```
+
+   Read `<output>/StarlinkSweeper/StarlinkSweeper.log`, and compare the masters with those of a run
+   without event script: along each masked trail, the perpendicular profile of the master (median
+   along the trail, minus the background 150-250 px away) must show no peak above its uncertainty,
+   while the unmasked master shows one.
+
+Notes: PixInsight does not follow symbolic links to frames; build test folders with hard links. In
+the `-r="script,arg,..."` argument, a `;` makes the automation instance hang (it waits forever):
+`tests/probe_mask_pi.js` therefore takes its options as `name=value+name=value`.
+
+## 6. Validating a change to the detector
+
+The numeric core is the section of `scripts/StarlinkSweeperCore.js` between the `numeric core` and
+`end of core` markers. The maintenance tools of `tests/` and `tools/` are Python scripts (numpy,
+scipy and astropy for the synthetic set); the script itself needs no Python.
 
 1. Generate the synthetic set once: `python3 tests/make_synthetic_subs.py <folder>`.
-2. Run the command-line version on it and on a few real subs:
-   `python3 python/starlinksweeper.py <folder> --preview-all --preview <output folder>`.
-   Every frame whose name starts with `sat_`, `starlink_` or `aircraft` must be flagged, the
-   `clean_*` and `star_spikes` frames must not; look at the PNG previews.
-3. Port the change to `scripts/StarlinkSweeper.js` (the numeric core is the section between the
-   `numeric core` and `end of core` markers) and check both give the same scores on the same files.
-4. A change that must not alter the results (porting, refactoring, speed): run
+2. Scan it, and a few real subs, with the dialog (*Script > Execute Script File* on
+   `scripts/StarlinkSweeper.js`). Every frame whose name starts with `sat_`, `starlink_` or
+   `aircraft` must be listed, the `clean_*` and `star_spikes` frames must not; look at the previews.
+3. A change that must not alter the results (porting, refactoring, speed): run
    `tests/run_scan_pi.js` with the previous and the new script on the same frames, in series and
    with `threads=0` (automatic thread count), and compare:
 
@@ -105,7 +167,7 @@ installed version stays in place.
    python3 -I tests/compare_scans.py <before.jsonl> <after.jsonl>
    ```
 
-## 6. Versions and history
+## 7. Versions and history
 
 * Numbering `MAJOR.MINOR.PATCH`: patch = bug fixed with no intended change in results, minor = new
   feature, major = incompatible settings or results.
@@ -115,7 +177,7 @@ installed version stays in place.
 * Getting a file from an older version:
   `git show v1.0.0:scripts/StarlinkSweeper.js > StarlinkSweeper-1.0.0.js`
 
-## 7. Still to check
+## 8. Still to check
 
 * Behaviour on OSC (CFA) subs and on 3-channel files: only channel 0 is analysed.
 * Scan time on very large folders (hundreds of frames): the previews are kept in memory for the

@@ -1,9 +1,18 @@
 # StarlinkSweeper
 
+## UPDATE 1.3.0: SNR-preserving masking
+
+> **Your trailed frames no longer have to be thrown away.** With WBPP, a new event script keeps the
+> frames crossed by a satellite trail and masks only the pixels of the trail, wings included. The
+> rest of the frame still goes into the integration, so the signal-to-noise ratio of the master is
+> almost untouched, where the quarantine loses the whole frame. This is a big improvement over the
+> quarantine, available for now only through a WBPP integration: see
+> [Masking in WBPP](#masking-in-wbpp-keep-the-frames).
+
 **A PixInsight script that finds the light frames crossed by satellite trails, so you can leave
 them out of the integration.** Point it at the folder of your subs, scan, check each suspect frame
-on a preview with the trail drawn in red, then quarantine it or erase it. A Python command-line
-version does the same in batch.
+on a preview with the trail drawn in red, then quarantine it or erase it. **With WBPP, you can also
+keep those frames**: an event script masks only the pixels of their trails (see *Masking in WBPP*).
 
 *Sweeps away the trails a certain billionaire's constellation leaves on your subs.*
 
@@ -24,7 +33,8 @@ the linear data, obvious once you stretch hard. The quality score of the pre-pro
 does not see it either: a trail changes neither star count, FWHM nor roundness, so the sub is kept.
 
 When you do not have enough subs, the best fix is to leave the contaminated sub out of the
-integration. StarlinkSweeper finds it.
+integration. StarlinkSweeper finds it. With WBPP you do not even have to give up the sub: the
+masking option keeps it and leaves out only the pixels of the trail, wings included.
 
 ## What it does
 
@@ -53,18 +63,10 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` | 1.9.4 and later (1.9.5 for the parallel scan) |
+| `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (dialog: scan, quarantine) | 1.9.4 and later (1.9.5 for the parallel scan) |
+| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masking in WBPP) | 1.9.4 and later, WBPP with event scripts (tested with WBPP 3.1.2 in PixInsight 1.9.5; parallel detection needs 1.9.5) |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
-
-The command-line version, `python/starlinksweeper.py`, is a separate tool for batch use outside
-PixInsight; the script does not need it. It needs Python 3 with `numpy`, `scipy` and `astropy`,
-installed once:
-
-* Debian, Ubuntu and derivatives: `sudo apt install python3-numpy python3-scipy python3-astropy`
-  (pip refuses to write into the system Python there);
-* Windows, macOS, other Linux: `pip install numpy scipy astropy` (or `py -3 -m pip ...`);
-* or a virtual environment: `python3 -m venv <folder> && <folder>/bin/pip install numpy scipy astropy`.
 
 ## Installation
 
@@ -80,7 +82,9 @@ Until the repository is code-signed, PixInsight only accepts it with the
 
 ### Manual
 
-Download `scripts/StarlinkSweeper.js`, then either run it with *Script > Execute Script File*, or
+Download **all the files of `scripts/`** into the same folder (the dialog includes
+`StarlinkSweeperCore.js`, the WBPP event script loads the three others), then either run
+`StarlinkSweeper.js` with *Script > Execute Script File*, or
 add its folder with *Script > Feature Scripts > Add* so it shows up in the *Script > JPS*
 menu.
 
@@ -97,6 +101,12 @@ Run it before integration, on the raw or calibrated lights. If a master already 
 straight band after stretching, scan the subs that went into it: the contaminated one stands out
 far above the others.
 
+## Language
+
+The interface is in English or French: **Langue / Language** list, next to the *Scan* button. The
+choice is remembered; by default the language of the system. The window reopens in the chosen
+language and keeps the results of the scan. The console and the CSV report stay in English.
+
 ## Parallel scan
 
 With PixInsight 1.9.5 and later, the frames are analysed in parallel inside PixInsight, one per
@@ -105,6 +115,49 @@ a time. **Threads**, in the *Scanner* box: **Auto** (default) uses as many threa
 processors allowed in the PixInsight preferences, fewer when the available memory is short (each
 thread holds one frame); **1** analyses one frame at a time. With PixInsight 1.9.4 the scan runs one
 frame at a time. Nothing to install.
+
+## Masking in WBPP (keep the frames)
+
+Instead of setting a frame aside, WBPP can keep it and leave out only the pixels of its trails.
+**This is the recommended way when you stack with WBPP**: a quarantined frame is lost entirely and the
+signal-to-noise ratio of the master drops accordingly, while a masked frame keeps everything but its
+trails (usually 0.1 to 2 % of the frame), so the signal-to-noise ratio is almost untouched (measured
+below). For now it needs a WBPP integration; the quarantine remains for any other stacking software.
+
+1. In WBPP, *Pipeline* tab, tick **Event Script** and select `StarlinkSweeper-WBPP.js` in the
+   StarlinkSweeper folder (the *Masking in WBPP* box of the dialog shows its path).
+2. Run WBPP as usual, on all your lights: do **not** quarantine the frames you stack this way.
+
+Right after registration, every registered light frame is scanned in every direction. Each trail
+found is masked, wings included, each member of a Starlink train separately; the masked pixels are
+set to 0 in the registered frame, and WBPP's integration rejects them (range rejection at 0, the
+default for lights). Each pixel is integrated from the frames that are clean there; the frame keeps
+everything else. Local normalization then works on the masked frames. Your source frames are never touched:
+only the registered frames of the WBPP output folder are modified.
+
+In `<WBPP output>/StarlinkSweeper/`: the log `StarlinkSweeper.log`, and per group of frames one
+compressed `<frame>_mask.xisf` per masked frame, `coverage.xisf` (fraction of the frames kept at
+each pixel), `coverage.csv`, `frames.csv` (score, trails and masked fraction of every frame) and
+`trails.csv` (angle, length and width of every masked trail).
+
+**Disk space.** Besides WBPP's own files: about 0.1 MB per masked 61 Mpx frame and about 1 MB per
+group (coverage map and reports). On a 76-frame narrowband set, 0.5 to 0.85 MB per filter.
+
+**One event script per WBPP run**: StarlinkSweeper's or ClarkeMask's, not both.
+
+Measured on a raw (uncalibrated) narrowband set of 76 frames of 61 Mpx (H, S, O; 300 s), WBPP 3.1.2
+with local normalization: 9 frames masked, among them a Starlink train of seven parallel trails
+masked on 2.1 % of its frame and 8 single trails on 0.1 to 0.2 % of theirs; about 20 s per group of
+23 to 27 frames on 28 processors. In the masters integrated by WBPP from all the frames, the trails
+left a faint straight trace along their path (0.1 to 0.2 σ of the master's noise per pixel, the kind
+of band a hard stretch reveals); with the masking, the trace is gone (at the noise level, like with
+masks drawn by hand two to three times wider) and the noise of the masters is unchanged. Two faint
+trails that the quarantine scan of the unregistered frames had missed were found and masked.
+
+On a galaxy field rich in stars (109 raw luminance frames of 61 Mpx, 150 s): 53 frames masked, each
+one crossed by a real trail (checked against an independent scan of the unregistered frames and on
+full-resolution crops), no false positive found; a median of 0.2 % of a frame masked, at most 0.9 %;
+82 s for the 109 frames on 28 processors, 6.75 MB of masks and reports.
 
 ## Settings
 
@@ -123,21 +176,6 @@ options, threads and the last folder are remembered from one session to the next
 **Reset** button (bottom left, PixInsight style) forgets them all and restores the defaults.
 
 Whatever the level, look at the preview before erasing.
-
-## Command line
-
-```
-python3 python/starlinksweeper.py /path/to/lights -r                 # scan recursively, CSV report
-python3 python/starlinksweeper.py /path/to/lights -r --preview out/   # also a PNG per flagged frame
-python3 python/starlinksweeper.py /path/to/lights -r --move /path/to/lights_trails
-python3 python/starlinksweeper.py /path/to/lights -t 15 -j 4 -o report.csv --list flagged.txt
-```
-
-Options: `-r` recursive, `-t` score from which a frame is flagged (default 20, the listing level of the script), `-j` parallel processes (default `auto`: one core is left free and the count is capped by the available memory, about 100 MB plus 5 bytes per pixel per worker; the chosen count and the reason are printed),
-`-o` CSV path, `--preview DIR` (PNG for flagged frames, `--preview-all` for every frame),
-`--move DIR` (move flagged frames, never deletes; put it next to the scanned folder, not inside), `--list FILE` (flagged file names, one per
-line, handy to deselect them in your stacking software), `--all-types` (also scan flats, darks and
-bias, which are skipped by default from their header). The CLI never deletes anything.
 
 ## How it works, in short
 
@@ -159,8 +197,19 @@ Validated on a synthetic full-frame set (clean sky, cloud, strong gradient, brig
 diffraction spikes, trails from very faint to saturated, a satellite train, an aircraft, a trail
 covering only part of the frame; `tests/make_synthetic_subs.py`) and on real subs: every trail is
 detected and clean frames stay well below the listing level; only the bright-filament stress case
-comes near it. The PixInsight script and the command-line version give the same scores to the
-decimal.
+comes near it.
+
+**Masking (WBPP event script).** On each registered frame, the scan above runs on the mean of the
+channels with the bins of the registration borders (pixels at 0) left out, so that their edges are
+not taken for lines, and with every line kept. Candidate lines score 15 or more (the list of the
+dialog starts at 20: masking a few pixels costs little, a trail left in costs a band in the
+master). Along each direction found, the trail detector of ClarkeMask (`StarlinkSweeperMaskCore.js`,
+a copy of its core) works on the 2x2 mean of the frame: it rectifies the frame along the direction,
+finds each thin trail (each member of a train separately, a slight bend allowed: long low-orbit trails
+are not perfectly straight), measures where it rises above the noise (down to 0.5 σ per pixel on each
+side: the wings) and where it ends, and draws the mask at full
+resolution, 4 px wider on each side and 16 px longer at each end. Only the trails within 120 px of
+a candidate line are masked.
 
 ### Limits
 
@@ -169,7 +218,10 @@ decimal.
 * Long, bright and very straight nebula filaments can come near the listing level. That is what the
   preview is for.
 * Trails shorter than a quarter of the frame are ignored by design.
-* The command-line version does not read compressed XISF files (the PixInsight script does).
+* Masking: a trail must span about a quarter of the frame to be found (as for the scan); a trail
+  that fades in places can be masked in pieces, with short unmasked gaps. Not tested with drizzle
+  integration. The local normalization reference built by WBPP from the masked frames has not been
+  checked on its own (the masters were).
 
 ## License
 

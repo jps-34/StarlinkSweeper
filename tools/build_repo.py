@@ -9,12 +9,16 @@ Creates, for the current script version:
   docs/updates.xri                           repository index (unsigned)
 
 The archive follows the layout required by PixInsight:
-  src/scripts/StarlinkSweeper/StarlinkSweeper.js  (+ .xsgn if present next to the .js)
+  src/scripts/StarlinkSweeper/StarlinkSweeper.js            (+ .xsgn if present next to each .js)
+  src/scripts/StarlinkSweeper/StarlinkSweeperCore.js
+  src/scripts/StarlinkSweeper/StarlinkSweeperMaskCore.js
+  src/scripts/StarlinkSweeper/StarlinkSweeperMaskEngine.js
+  src/scripts/StarlinkSweeper/StarlinkSweeper-WBPP.js
   src/scripts/StarlinkSweeper/LICENSE
 
 Order for a signed release:
-  1. sign scripts/StarlinkSweeper.js with CodeSign (creates the .xsgn file next to it);
-  2. run this script (the .xsgn file is packed, SHA-1 digest computed);
+  1. sign the five scripts/*.js files with CodeSign (creates the .xsgn files next to them);
+  2. run this script (the .xsgn files are packed, SHA-1 digest computed);
   3. sign docs/updates.xri with CodeSign (last step: any later change to the
      archive or to updates.xri invalidates the signature);
   4. commit and push.
@@ -28,14 +32,19 @@ NAME = "StarlinkSweeper"
 PACKAGES = [
     {
         "script": "scripts/StarlinkSweeper.js",
+        # no menu entry: included by the script, or loaded by the WBPP event script (masking option)
+        "extras": ["scripts/StarlinkSweeperCore.js", "scripts/StarlinkSweeperMaskCore.js",
+                   "scripts/StarlinkSweeperMaskEngine.js", "scripts/StarlinkSweeper-WBPP.js"],
         "suffix": "PI194",
         "version": "1.9.4:1.9.99",
         "title": "StarlinkSweeper {v} (PixInsight 1.9.4 and later)",
         "desc": "Scans a folder tree of light frames (FITS / XISF) for satellite, Starlink train and "
                 "aircraft trails, lists the affected frames with a score, shows each detection on a "
                 "preview, and lets you quarantine (move to a <folder>_trails folder next to the scanned "
-                "one) or erase them one by one with confirmation. Parallel scan on all the processors with "
-                "PixInsight 1.9.5 and later. Installs under Script > JPS > StarlinkSweeper.",
+                "one) or erase them one by one with confirmation. With WBPP, the frames can be kept "
+                "instead: the event script StarlinkSweeper-WBPP.js masks only the pixels of the trails in "
+                "the registered frames. Parallel scan on all the processors with PixInsight 1.9.5 and "
+                "later. Installs under Script > JPS > StarlinkSweeper.",
     },
 ]
 SUMMARY = "StarlinkSweeper: finds the light frames crossed by satellite trails."
@@ -54,11 +63,16 @@ def build_zip(pkg, version, outdir):
     base = os.path.splitext(os.path.basename(src))[0]
     zname = "%s-%s-%s.zip" % (NAME, version, pkg["suffix"])
     zpath = os.path.join(outdir, zname)
-    entries = [(src, "src/scripts/%s/%s.js" % (NAME, base)),
-               (os.path.join(ROOT, "LICENSE"), "src/scripts/%s/LICENSE" % NAME)]
-    sig = os.path.splitext(src)[0] + ".xsgn"
-    if os.path.exists(sig):
-        entries.append((sig, "src/scripts/%s/%s.xsgn" % (NAME, base)))
+    entries = [(os.path.join(ROOT, "LICENSE"), "src/scripts/%s/LICENSE" % NAME)]
+    signed = True
+    for script in [src] + [os.path.join(ROOT, e) for e in pkg.get("extras", [])]:
+        name = os.path.splitext(os.path.basename(script))[0]
+        entries.append((script, "src/scripts/%s/%s.js" % (NAME, name)))
+        sig = os.path.splitext(script)[0] + ".xsgn"
+        if os.path.exists(sig):
+            entries.append((sig, "src/scripts/%s/%s.xsgn" % (NAME, name)))
+        else:
+            signed = False
     # fixed timestamps: the same sources always give the same archive (and SHA-1)
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for f, arc in entries:
@@ -67,7 +81,7 @@ def build_zip(pkg, version, outdir):
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, open(f, "rb").read())
     sha1 = hashlib.sha1(open(zpath, "rb").read()).hexdigest()
-    return zname, sha1, os.path.exists(sig)
+    return zname, sha1, signed
 
 
 def main():

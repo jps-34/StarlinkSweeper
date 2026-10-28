@@ -26,7 +26,9 @@ function record(r) {
             width: r.width, height: r.height, skipped: r.skipped || "", lines: lines, seconds: r.seconds };
 }
 
-var args = jsArguments, files = args.slice(1), threads = 1;
+// Runtime.jsArguments since PixInsight 1.9.5 (jsArguments is deprecated there)
+var args = ( typeof Runtime != "undefined" && Runtime.jsArguments ) ? Runtime.jsArguments : jsArguments;
+var files = args.slice(1), threads = 1;
 if (files.length && files[0].indexOf("threads=") == 0) {
    threads = scanThreads(files.slice(1), parseInt(files[0].substring(8)));
    files = files.slice(1);
