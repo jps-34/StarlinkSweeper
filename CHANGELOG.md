@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+* README (English and French), *Limits*: masking with 6 frames or fewer leaves faint dark lines in
+  the master, a side effect of the percentile clipping WBPP uses for small stacks (tighter on the
+  high side, applied to one value less where a trail was masked); none with 15 frames or more (ESD),
+  untested between 7 and 14 (Winsorized sigma clipping). Run WBPP without the event script for such
+  small stacks.
+
 ## 1.3.0 (2026-10-28)
 * **SNR-preserving masking option for WBPP** (`StarlinkSweeper-WBPP.js`, a WBPP event script):
   instead of setting a frame aside, WBPP keeps it and only the pixels of its trails are left out of

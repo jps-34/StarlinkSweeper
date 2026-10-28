@@ -222,6 +222,14 @@ a candidate line are masked.
   that fades in places can be masked in pieces, with short unmasked gaps. Not tested with drizzle
   integration. The local normalization reference built by WBPP from the masked frames has not been
   checked on its own (the masters were).
+* Masking with 6 frames or fewer: WBPP then integrates with percentile clipping, whose default
+  thresholds are tighter on the high side (0.10) than on the low side (0.20). Where a trail was
+  masked, the pixel keeps one frame less, and on such a small stack the clipping drops the higher of
+  the remaining values more often: the masked trails come out as faint dark lines in the master. It
+  is a side effect of WBPP's rejection for small stacks, not of the masks (the masked pixels are
+  rejected). With 15 frames or more (ESD rejection) there is no such effect; between 7 and 14 frames
+  (Winsorized sigma clipping) it has not been tested. For 6 frames or fewer, run WBPP without the
+  event script.
 
 ## License
 

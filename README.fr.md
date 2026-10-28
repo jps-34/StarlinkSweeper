@@ -251,6 +251,14 @@ ligne candidate sont masquées.
   intervalles non masqués. Non testé avec l'intégration drizzle. La référence de normalisation
   locale construite par WBPP à partir des brutes masquées n'a pas été vérifiée à part (les masters,
   si).
+* Masquage avec 6 brutes ou moins : WBPP intègre alors avec le percentile clipping, dont les seuils
+  par défaut sont plus sévères en haut (0,10) qu'en bas (0,20). Là où une traînée a été masquée, le
+  pixel compte une brute de moins, et sur une si petite pile l'écrêtage écarte plus souvent la plus
+  haute des valeurs restantes : les traînées masquées ressortent en lignes légèrement sombres dans
+  le master. C'est un effet de bord du rejet de WBPP pour les petites piles, pas des masques (les
+  pixels masqués sont bien rejetés). À partir de 15 brutes (rejet ESD), cet effet n'existe pas ;
+  entre 7 et 14 brutes (Winsorized sigma clipping), il n'a pas été testé. Pour 6 brutes ou moins,
+  lancer WBPP sans le script d'événements.
 
 ## Licence
 
