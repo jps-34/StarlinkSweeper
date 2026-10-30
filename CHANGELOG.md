@@ -1,12 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 (2026-10-30)
+* Deprecated `directory`, `fileName` and `getEnvironmentVariable()` replaced by `directoryPath`, `filePath`
+  and `System.getEnvironmentVariable()`, with the older names kept as a fallback. No change to the behaviour.
+* README (English and French), *Limits*: with the masking, do not reject frames on the `Trails` property
+  of ImageAnalysis.
 * README (English and French), *Limits*: masking with 6 frames or fewer leaves faint dark lines in
   the master, a side effect of the percentile clipping WBPP uses for small stacks (tighter on the
   high side, applied to one value less where a trail was masked); none with 15 frames or more (ESD),
   untested between 7 and 14 (Winsorized sigma clipping). Run WBPP without the event script for such
   small stacks.
-
+* Masking log: each group now starts its coverage report with `data lost overall`, the share of the
+  data really lost, and each line says how many frames are lost out of how many, so that a large share
+  of the field losing one frame no longer reads as a large loss.
+* Masking: trails crossing a corner are now found from about a tenth of the smaller image side instead of
+  15%. A short line on a saturated star is always left alone, to protect diffraction spikes. The scan
+  and the quarantine do not change.
 ## 1.3.0 (2026-10-28)
 * **SNR-preserving masking option for WBPP** (`StarlinkSweeper-WBPP.js`, a WBPP event script):
   instead of setting a frame aside, WBPP keeps it and only the pixels of its trails are left out of

@@ -23,6 +23,7 @@ var N_SEG        = 24;     // segments along a line for the continuity test
 var MIN_RUN      = 6;      // minimum consecutive significant segments
 var SEG_MIN_SIG  = 1.5;    // sigma, a segment is significant above this
 var SPIKE_MAX_RUN = 18;    // a line through a saturated star is a spike unless longer
+var MIN_LINE     = 0.15;   // shortest line searched, as a share of the smaller image side
 var MAX_CAND     = 8;      // coarse candidates refined per frame
 var FLOOR        = 4.0;    // internal detection floor (the listing level only filters)
 var MARGIN       = 12;     // binned pixels ignored along the frame edges
@@ -384,11 +385,14 @@ function endpoints(thetaDeg, rho, u0, u1, w, h, binning) {
             x1: Math.round((cx + rho * c - u1 * s) * binning), y1: Math.round((cy + rho * s + u1 * c) * binning) };
 }
 
-function analyseBinned(s8, w8, h8, invalid, maxLines) {
+function analyseBinned(s8, w8, h8, invalid, maxLines, minLine) {
    // s8: bin-8 mean image (Float32Array). Returns the analysis result.
    // invalid: optional no-data map of the bins (masking option, see normalise).
    // maxLines: lines kept, MAX_LINES when not given (the masking option keeps
    // every line, so that each member of a Starlink train is found).
+   // minLine: shortest line searched, MIN_LINE when not given (the masking
+   // option goes lower to reach corners; a shorter line on a saturated star
+   // is then always taken for a spike, since a spike can fill such a line).
    var nKeep = maxLines || MAX_LINES;
    checkAbort();
    var norm = normalise(s8, w8, h8, invalid);
@@ -406,7 +410,8 @@ function analyseBinned(s8, w8, h8, invalid, maxLines) {
    var P16 = new Projector(z16, v16, w16, h16);
    var nth = Math.round(180 / COARSE_STEP), thetas = new Float64Array(nth);
    for (var j = 0; j < nth; ++j) thetas[j] = j * COARSE_STEP;
-   var S = P16.significance(thetas, 0.15 * Math.min(w16, h16));
+   var lineShare = minLine || MIN_LINE;
+   var S = P16.significance(thetas, lineShare * Math.min(w16, h16));
    checkAbort();
    var coarseBest = 0, pool = [];
    for (var o2 = 0; o2 < S.S.length; ++o2) {
@@ -424,7 +429,7 @@ function analyseBinned(s8, w8, h8, invalid, maxLines) {
       if (!dup) cand.push({ i: ii, j: jj });
    }
    // ---- fine refinement + continuity test
-   var P8 = new Projector(z8, v8, w8, h8), minlen8 = 0.15 * Math.min(w8, h8), lines = [];
+   var P8 = new Projector(z8, v8, w8, h8), minlen8 = lineShare * Math.min(w8, h8), lines = [];
    var nf = Math.round(2 * FINE_HALF / FINE_STEP) + 1;
    for (var ci = 0; ci < cand.length; ++ci) {
       checkAbort();
@@ -447,7 +452,8 @@ function analyseBinned(s8, w8, h8, invalid, maxLines) {
          var theta = th[fb], rho = lo + ra - P8.half;
          var seg = P8.segments(theta, rho);
          var ct = continuity(seg.sig);
-         var spike = ct.run <= SPIKE_MAX_RUN && onBrightStar(theta, rho, ct.run, ct.start, norm.stars, seg.umin, seg.umax);
+         var shortLine = lineShare < MIN_LINE && (seg.umax - seg.umin) < MIN_LINE * Math.min(w8, h8);
+         var spike = (ct.run <= SPIKE_MAX_RUN || shortLine) && onBrightStar(theta, rho, ct.run, ct.start, norm.stars, seg.umin, seg.umax);
          var u0 = seg.umin + (seg.umax - seg.umin) * ct.start / N_SEG;
          var u1 = seg.umin + (seg.umax - seg.umin) * (ct.start + ct.run) / N_SEG;
          lines.push({ score: spike ? 0 : ct.score, peak: best, angle: theta, rho: rho, run: ct.run,
@@ -590,7 +596,7 @@ function coreSource() {
    // Any function or constant that analyseFile() or the masking engine comes
    // to use must be listed here.
    var c = { FINE_BIN: FINE_BIN, COARSE_STEP: COARSE_STEP, FINE_STEP: FINE_STEP, FINE_HALF: FINE_HALF,
-             N_SEG: N_SEG, MIN_RUN: MIN_RUN, SEG_MIN_SIG: SEG_MIN_SIG, SPIKE_MAX_RUN: SPIKE_MAX_RUN,
+             N_SEG: N_SEG, MIN_RUN: MIN_RUN, SEG_MIN_SIG: SEG_MIN_SIG, SPIKE_MAX_RUN: SPIKE_MAX_RUN, MIN_LINE: MIN_LINE,
              MAX_CAND: MAX_CAND, FLOOR: FLOOR, MARGIN: MARGIN, STAR_SUM: STAR_SUM, MAX_LINES: MAX_LINES,
              NODATA_GROW: NODATA_GROW, TYPE_KEYWORDS: TYPE_KEYWORDS };
    var src = [ "var verboseLog = false, abortRequested = null;" ];

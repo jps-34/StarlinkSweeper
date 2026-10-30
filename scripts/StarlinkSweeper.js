@@ -6,7 +6,7 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.3.0
+ * StarlinkSweeper.js  v1.3.1
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,8 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.3.1: masking finds trails crossing a corner; the log states the data really
+ *   lost; deprecated names replaced.
  * v1.3.0: masking option for WBPP (StarlinkSweeper-WBPP.js): the frames are
  *   kept and only the pixels of their trails are left out of the integration.
  *   The detection core moves to StarlinkSweeperCore.js. Interface in English or
@@ -89,7 +91,7 @@
 CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.3.0";
+var VERSION = "1.3.1";
 var SCRIPT_DIR = File.extractDrive(#__FILE__) + File.extractDirectory(#__FILE__);
 var EVENT_SCRIPT = SCRIPT_DIR + "/StarlinkSweeper-WBPP.js";   // masking option, run by WBPP
 
@@ -188,7 +190,11 @@ function detectLanguage() {
    var names = ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"];
    for (var i = 0; i < names.length; ++i) {
       try {
-         var v = getEnvironmentVariable(names[i]);
+         var v = "";
+         if (typeof System !== "undefined" && System.getEnvironmentVariable)
+            v = System.getEnvironmentVariable(names[i]);
+         else if (typeof getEnvironmentVariable === "function")
+            v = getEnvironmentVariable(names[i]);
          if (v && v.length > 0 && v != "C" && v != "POSIX") return v.toLowerCase().indexOf("fr") == 0 ? "fr" : "en";
       } catch (e) { }
    }
@@ -252,7 +258,7 @@ constructor() {
       var gdd = new GetDirectoryDialog;
       gdd.caption = L("StarlinkSweeper : choisir le dossier des brutes", "StarlinkSweeper: select the lights folder");
       if (self.folder.length) gdd.initialPath = self.folder;
-      if (gdd.execute()) { self.folder = gdd.directory; self.folderEdit.text = self.folder; }
+      if (gdd.execute()) { self.folder = gdd.directoryPath || gdd.directory; self.folderEdit.text = self.folder; }
    };
    this.recursiveCheck = new CheckBox(this);
    this.recursiveCheck.text = L("Sous-dossiers compris", "Include sub-folders");
@@ -927,8 +933,9 @@ exportCSV() {
             + format("%.1f", r.score) + ","
             + format("%.1f", r.coarse) + "," + shown.length + "," + r.status + "," + csvEscape(desc.join(" | ")) + ",\n";
    }
-   File.writeTextFile(sfd.fileName, text);
-   console.writeln("Report written to " + sfd.fileName);
+   var reportPath = sfd.filePath || sfd.fileName;
+   File.writeTextFile(reportPath, text);
+   console.writeln("Report written to " + reportPath);
 }
 
 }

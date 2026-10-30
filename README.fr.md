@@ -246,11 +246,15 @@ ligne candidate sont masquées.
 * Des filaments de nébuleuse longs, brillants et très rectilignes peuvent s'approcher du niveau de
   liste. L'aperçu sert à ça.
 * Les traînées plus courtes qu'un quart du champ sont ignorées par construction.
-* Masquage : une traînée doit couvrir environ un quart du champ pour être trouvée (comme pour le
-  scan) ; une traînée qui pâlit par endroits peut être masquée en morceaux, avec de courts
+* Masquage : une traînée doit couvrir environ un quart de la ligne qui la porte pour être trouvée (comme pour le
+  scan) : une traînée courte est donc trouvée dans un coin, à partir d'environ un dixième du petit côté de
+  l'image, mais pas en plein champ. Une traînée qui pâlit par endroits peut être masquée en morceaux, avec de courts
   intervalles non masqués. Non testé avec l'intégration drizzle. La référence de normalisation
   locale construite par WBPP à partir des brutes masquées n'a pas été vérifiée à part (les masters,
   si).
+* ImageAnalysis (PixInsight 1.9.6) : avec le masquage, ne rejetez pas de brutes sur sa propriété `Trails`
+  (par exemple `Trails < 1`) : elles seraient perdues au lieu d'être masquées. WBPP n'utilise pas cette
+  propriété ; les autres mesures d'ImageAnalysis ne sont pas concernées.
 * Masquage avec 6 brutes ou moins : WBPP intègre alors avec le percentile clipping, dont les seuils
   par défaut sont plus sévères en haut (0,10) qu'en bas (0,20). Là où une traînée a été masquée, le
   pixel compte une brute de moins, et sur une si petite pile l'écrêtage écarte plus souvent la plus

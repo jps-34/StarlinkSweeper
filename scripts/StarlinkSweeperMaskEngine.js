@@ -35,12 +35,13 @@ var StarlinkSweeperMaskEngine = ( function()
 {
    "use strict";
 
-   var VERSION = "1.3.0";
+   var VERSION = "1.3.1";
    var NO_SWAP_FILE = 0xFFFFFFFF;    // UndoFlag_NoSwapFile
    var MASK_HINTS = "compression-codec zlib+sh";
 
    var DEFAULTS = {
       minScore: 15,         // candidate lines from this score up (the list of the dialog starts at 20)
+      minLine: 0.10,        // shortest line searched, share of the smaller image side (reaches corners)
       groupAngle: 1.0,      // deg: candidate lines closer than this share one direction
       keepDistance: 60,     // detection-image px: trails further than this from every candidate are not masked
       margin: 4,            // full-resolution px added across each trail
@@ -140,7 +141,7 @@ var StarlinkSweeperMaskEngine = ( function()
       // (binMeanNoData, analyseBinned, FINE_BIN); MC: the mask core. Returns a
       // result for MC.rasterize ({w, h, theta, trails}) with the scan summary.
       var b8 = S.binMeanNoData( full, W, H, S.FINE_BIN );
-      var scan = S.analyseBinned( b8.data, b8.w, b8.h, b8.invalid, 100 );
+      var scan = S.analyseBinned( b8.data, b8.w, b8.h, b8.invalid, 100, d.minLine );
       var cand = [];
       for ( var i = 0; i < scan.lines.length; ++i )
          if ( scan.lines[i].score >= d.minScore )
@@ -204,7 +205,7 @@ var StarlinkSweeperMaskEngine = ( function()
 
    function detectData( opt )
    {
-      return { minScore: opt.minScore, groupAngle: opt.groupAngle, keepDistance: opt.keepDistance,
+      return { minScore: opt.minScore, minLine: opt.minLine, groupAngle: opt.groupAngle, keepDistance: opt.keepDistance,
                detect: opt.detect, binning: opt.binning };
    }
 
@@ -503,16 +504,23 @@ var StarlinkSweeperMaskEngine = ( function()
          opt.log( "coverage: no pixel covered by every frame" );
          return 0;
       }
-      var worst = all - mn, csv = [ "frames_lost,exposure_kept,pixels,field_fraction" ];
-      opt.log( worst == 0 ? "coverage: no pixel lost any frame" :
-               "coverage: at most " + worst + " of " + all + " frames lost at a pixel (exposure kept there " +
-               percent( mn / all, 0 ) + "), on " + share( lost[worst] / field ) + " of the field" );
+      var worst = all - mn, csv = [ "frames_lost,exposure_kept,pixels,field_fraction" ], lostSum = 0, hit = 0;
+      for ( var k1 = 1; k1 <= all; ++k1 )
+      {
+         lostSum += k1 * lost[k1];
+         hit += lost[k1];
+      }
+      opt.log( "data lost overall: " + share( lostSum / ( field * all ) ) + " (masked pixels out of all the pixels of the " +
+               all + " frames)" );
+      if ( worst > 0 )
+         opt.log( "   " + share( hit / field ) + " of the field lost at least one frame, the rest keeps them all:" );
       for ( var k2 = 0; k2 <= all; ++k2 )
          if ( lost[k2] > 0 )
          {
             csv.push( k2 + "," + ( ( all - k2 ) / all ).toFixed( 4 ) + "," + lost[k2] + "," + ( lost[k2] / field ).toFixed( 6 ) );
             if ( k2 > 0 )
-               opt.log( "   " + k2 + " frame(s) lost: " + lost[k2] + " px (" + share( lost[k2] / field ) + " of the field)" );
+               opt.log( "   " + k2 + " of " + all + " frames lost: " + share( lost[k2] / field ) + " of the field, " +
+                        lost[k2] + " px (exposure kept there " + percent( ( all - k2 ) / all, 1 ) + ")" );
          }
       if ( low > 0 )
          opt.log( "** " + low + " px keep less than " + percent( opt.lowCoverage, 0 ) + " of the frames" );

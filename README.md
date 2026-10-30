@@ -218,10 +218,15 @@ a candidate line are masked.
 * Long, bright and very straight nebula filaments can come near the listing level. That is what the
   preview is for.
 * Trails shorter than a quarter of the frame are ignored by design.
-* Masking: a trail must span about a quarter of the frame to be found (as for the scan); a trail
+* Masking: a trail must span about a quarter of the line it lies on to be found (as for the scan), so a
+  short trail is found in a corner, from about a tenth of the smaller image side, and not in the middle of
+  the frame. A trail
   that fades in places can be masked in pieces, with short unmasked gaps. Not tested with drizzle
   integration. The local normalization reference built by WBPP from the masked frames has not been
   checked on its own (the masters were).
+* ImageAnalysis (PixInsight 1.9.6): with the masking, do not reject frames on its `Trails` property
+  (for example `Trails < 1`): those frames would be lost instead of masked. WBPP does not use this
+  property; the other measurements of ImageAnalysis are not affected.
 * Masking with 6 frames or fewer: WBPP then integrates with percentile clipping, whose default
   thresholds are tighter on the high side (0.10) than on the low side (0.20). Where a trail was
   masked, the pixel keeps one frame less, and on such a small stack the clipping drops the higher of

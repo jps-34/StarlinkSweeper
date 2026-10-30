@@ -2,6 +2,9 @@
 
 Notes for the author. Nothing here is needed to use the script.
 
+Python is used only by the maintenance tools of `tools/` and `tests/`, on the author's machine: it is never
+packaged, installed or run by the script.
+
 ## 1. Repository layout
 
 | Path | Role |
