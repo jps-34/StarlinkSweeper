@@ -6,7 +6,7 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.3.1
+ * StarlinkSweeper.js  v1.3.2
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,7 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.3.2: Export CSV works again; Return in an edit box runs no button.
  * v1.3.1: masking finds trails crossing a corner; the log states the data really
  *   lost; deprecated names replaced.
  * v1.3.0: masking option for WBPP (StarlinkSweeper-WBPP.js): the frames are
@@ -91,7 +92,7 @@
 CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.3.1";
+var VERSION = "1.3.2";
 var SCRIPT_DIR = File.extractDrive(#__FILE__) + File.extractDirectory(#__FILE__);
 var EVENT_SCRIPT = SCRIPT_DIR + "/StarlinkSweeper-WBPP.js";   // masking option, run by WBPP
 
@@ -224,6 +225,8 @@ function removeSettings() {
 class SweeperDialog extends Dialog {
 constructor() {
    super();
+   // Return must validate the edit boxes, not run a button of the dialog.
+   this.autoDefaultButton = false;
    var self = this;
 
    this.results = [];          // all analysed frames
@@ -926,8 +929,8 @@ exportCSV() {
       if (r.status == "skipped") { text += csvEscape(r.file) + ",,,,,,skipped: " + r.skipped + ",,\n"; continue; }
       var desc = [], shown = this.shownLines(r);
       for (var k = 0; k < shown.length; ++k) {
-         var L = shown[k];
-         desc.push(format("%.1f@%.2f:%d,%d-%d,%d", L.score, L.angle, L.x0, L.y0, L.x1, L.y1));
+         var ln = shown[k];
+         desc.push(format("%.1f@%.2f:%d,%d-%d,%d", ln.score, ln.angle, ln.x0, ln.y0, ln.x1, ln.y1));
       }
       text += csvEscape(r.file) + "," + (r.score >= this.threshold ? 1 : 0) + "," + (r.score >= this.alert ? 1 : 0) + ","
             + format("%.1f", r.score) + ","

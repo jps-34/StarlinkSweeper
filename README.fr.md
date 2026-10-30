@@ -71,7 +71,7 @@ scannés.
 | Fichier | PixInsight |
 |---|---|
 | `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (boîte : scan, quarantaine) | 1.9.4 et suivants (1.9.5 pour le scan parallèle) |
-| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masquage dans WBPP) | 1.9.4 et suivants, WBPP avec scripts d'événement (testé avec WBPP 3.1.2 dans PixInsight 1.9.5 ; la détection parallèle demande 1.9.5) |
+| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masquage dans WBPP) | 1.9.5 et suivants (WBPP 3.1 ou suivant ; testé avec WBPP 3.2.0 dans PixInsight 1.9.6) |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 

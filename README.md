@@ -64,7 +64,7 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 | File | PixInsight |
 |---|---|
 | `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (dialog: scan, quarantine) | 1.9.4 and later (1.9.5 for the parallel scan) |
-| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masking in WBPP) | 1.9.4 and later, WBPP with event scripts (tested with WBPP 3.1.2 in PixInsight 1.9.5; parallel detection needs 1.9.5) |
+| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masking in WBPP) | 1.9.5 and later (WBPP 3.1 or later; tested with WBPP 3.2.0 in PixInsight 1.9.6) |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 

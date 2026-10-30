@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 (2026-10-30)
+* README (English and French): the masking in WBPP is announced from PixInsight 1.9.5, whose WBPP calls the
+  event functions it uses; it was announced from 1.9.4 without having been tested there.
+* *Export CSV* works again: it stopped with an error before the file dialog since 1.3.0.
+* Return no longer runs a button of the dialog: PixInsight 1.9.6 activates the first button of a dialog
+  when Return is pressed in an edit box, which could start a run or reset the settings.
+
 ## 1.3.1 (2026-10-30)
 * Deprecated `directory`, `fileName` and `getEnvironmentVariable()` replaced by `directoryPath`, `filePath`
   and `System.getEnvironmentVariable()`, with the older names kept as a fallback. No change to the behaviour.
