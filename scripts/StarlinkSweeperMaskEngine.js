@@ -7,9 +7,10 @@
  * Code written by Claude (Anthropic), under the direction of Jacques Pouyaud.
  *
  * Masking option of StarlinkSweeper: instead of setting a whole frame aside,
- * only the pixels of its trails are set to 0 in the registered frame, which
- * WBPP's integration rejects (range rejection at 0 for light frames). Each
- * pixel is then integrated from the frames that are clean there.
+ * only the pixels of its trails are set to 0 in a masked copy of the registered
+ * frame, which WBPP's integration rejects (range rejection at 0 for light
+ * frames). Each pixel is then integrated from the frames that are clean there.
+ * The registered frames themselves are never modified.
  *
  * Per registered frame:
  *   1. detection image: mean of the channels (0 where any channel is 0);
@@ -21,21 +22,22 @@
  *      core) finds every trail (each member of a train separately), its width
  *      and its ends; only the trails close to a candidate line are kept;
  *   5. rasterize() at full resolution, 0 under the mask in every channel, the
- *      frame saved in place, a mask file and a coverage map written.
+ *      masked copy saved in its own folder, a mask file and a coverage map written.
  * With PixInsight 1.9.5 and later, steps 1 to 4 run on Thread objects (each
  * with a runtime of its own, rebuilt from the sources of both cores); the
  * frames are masked and saved in order in the main thread.
  *
  * Needs StarlinkSweeperScan (StarlinkSweeperCore.js) and
- * StarlinkSweeperMaskCore (StarlinkSweeperMaskCore.js) loaded first. No
- * #include here: the WBPP event script loads this file with eval.
+ * StarlinkSweeperMaskCore (StarlinkSweeperMaskCore.js) available. No #include
+ * here: tools/build_pipeline_builder.py concatenates these files into the
+ * pipeline builder, which WBPP evaluates as one file.
  */
 
 var StarlinkSweeperMaskEngine = ( function()
 {
    "use strict";
 
-   var VERSION = "1.3.2";
+   var VERSION = "1.4.0";
    var NO_SWAP_FILE = 0xFFFFFFFF;    // UndoFlag_NoSwapFile
    var MASK_HINTS = "compression-codec zlib+sh";
 
@@ -53,7 +55,8 @@ var StarlinkSweeperMaskEngine = ( function()
       detect: { maxCoreWidth: 40, edgeSigma: 0.5, maxBend: 12 },
       outputDir: "",        // masks, coverage map and reports ("" = no files)
       writeMasks: true,     // one <frame>_mask.xisf per masked frame
-      dryRun: false,        // masks and reports only, frames not modified
+      dryRun: false,        // masks and reports only, no copies
+      copyDir: "",          // folder of the masked copies, required unless dryRun; the frames are never modified
       noData: 0,            // value written under the masks
       lowCoverage: 0.5,     // warn where fewer than this fraction of the frames remain
       threads: null,        // detection threads: null = setting StarlinkSweeper/threads, 0 = automatic, 1 = serial
@@ -335,20 +338,6 @@ var StarlinkSweeperMaskEngine = ( function()
       win.keywords = kw;
    }
 
-   function saveInPlace( win, path )
-   {
-      // Writes to a temporary file next to the original, then replaces it, so
-      // that a failure never leaves a half-written frame.
-      var tmp = File.extractDrive( path ) + File.extractDirectory( path ) + "/" + baseName( path ) +
-                "_sstmp" + File.extractExtension( path );
-      if ( File.exists( tmp ) )
-         File.remove( tmp );
-      if ( !win.saveAs( tmp, false /*query*/, false /*messages*/, false /*strict*/, false /*verifyOverwrite*/ ) )
-         throw new Error( "Unable to write " + tmp );
-      File.remove( path );
-      File.move( tmp, path );
-   }
-
    function writeImage( path, data, w, h, bits, real, hints )
    {
       // Writes a one-channel image ([0,1] data) as XISF with the given sample
@@ -414,7 +403,7 @@ var StarlinkSweeperMaskEngine = ( function()
          }
          var mask = new Uint8Array( W * H );
          var pixels = res.trails.length ? StarlinkSweeperMaskCore.rasterize( res, W, H, opt.binning, opt.margin, opt.endMargin, mask ) : 0;
-         var maskBytes = 0;
+         var maskBytes = 0, output = "";
          if ( pixels > 0 )
          {
             if ( !opt.dryRun )
@@ -422,7 +411,9 @@ var StarlinkSweeperMaskEngine = ( function()
                applyMask( win, mask, opt.noData );
                addHistory( win, "StarlinkSweeper " + VERSION + ": " + res.trails.length + " trails, " +
                            pixels + " pixels set to " + opt.noData );
-               saveInPlace( win, path );
+               output = opt.copyDir + "/" + baseName( path ) + File.extractExtension( path );
+               if ( !win.saveAs( output, false /*query*/, false /*messages*/, false /*strict*/, false /*verifyOverwrite*/ ) )
+                  throw new Error( "Unable to write " + output );
             }
             if ( opt.outputDir && opt.writeMasks )
             {
@@ -451,7 +442,7 @@ var StarlinkSweeperMaskEngine = ( function()
                ++coverage.frames;
             }
          }
-         return { file: path, score: res.score, candidates: res.candidates, directions: res.directions,
+         return { file: path, output: output, score: res.score, candidates: res.candidates, directions: res.directions,
                   trails: res.trails, far: res.far, rejected: res.rejected, pixels: pixels, fraction: pixels / ( W * H ),
                   maskBytes: maskBytes, seconds: ( Date.now() - t0 ) / 1000 + ( found ? found.seconds : 0 ) };
       }
@@ -536,11 +527,16 @@ var StarlinkSweeperMaskEngine = ( function()
 
    function processGroup( paths, o )
    {
-      // Masks the trails of every frame of a registered group (in place).
+      // Writes a masked copy of every frame of a registered group that has
+      // trails, in opt.copyDir (result.output of each masked frame).
       // Returns {results, failed, masked, bytes}.
       var opt = options( o ), T0 = Date.now();
+      if ( !opt.dryRun && !opt.copyDir )
+         throw new Error( "processGroup: no folder for the masked copies" );
       if ( opt.outputDir && !File.directoryExists( opt.outputDir ) )
          File.createDirectory( opt.outputDir, true );
+      if ( opt.copyDir && !File.directoryExists( opt.copyDir ) )
+         File.createDirectory( opt.copyDir, true );
       opt.log( "masking trails from a scan score of " + opt.minScore + " (frames are listed in the dialog from 20)" +
                ( opt.dryRun ? "; dry run, frames not modified" : "" ) );
       var nth = threadCount( opt, paths ), pool = null;
@@ -605,7 +601,7 @@ var StarlinkSweeperMaskEngine = ( function()
             catch ( e )
             {
                failed.push( paths[f] );
-               opt.log( "** " + baseName( paths[f] ) + " left untouched: " + e.message );
+               opt.log( "** " + baseName( paths[f] ) + " not masked: " + e.message );
             }
          }
       }

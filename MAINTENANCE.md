@@ -10,14 +10,16 @@ packaged, installed or run by the script.
 | Path | Role |
 |---|---|
 | `scripts/StarlinkSweeper.js` | the PixInsight script: dialog, quarantine, settings; includes the core below |
-| `scripts/StarlinkSweeperCore.js` | detection core of the script: parameters, numeric analysis, file reading, parallel scan. No `#include` and only top-level `var` / `function` declarations, so that a WBPP event script can load it with an indirect `eval` |
+| `scripts/StarlinkSweeperCore.js` | detection core of the script: parameters, numeric analysis, file reading, parallel scan. No `#include` and only top-level `var` / `function` declarations, so that it can be concatenated into the pipeline builder |
 | `tests/make_synthetic_subs.py` | generates the synthetic validation frames (a few GB, a few minutes) |
 | `tests/run_scan_pi.js` | runs the analysis of the script on a list of frames inside PixInsight, without the dialog: one JSON line per frame |
 | `tests/compare_scans.py` | compares two runs of `run_scan_pi.js`, field by field |
-| `scripts/StarlinkSweeper-WBPP.js` | WBPP event script of the masking option (no menu entry) |
-| `scripts/StarlinkSweeperMaskEngine.js` | masking engine: detection per registered frame, masks, in-place save, coverage, threads |
-| `scripts/StarlinkSweeperMaskCore.js` | copy of ClarkeMask's `ClarkeMaskCore.js` (only the factory and namespace renamed): trail width, ends, mask drawing |
-| `tests/run_mask_pi.js` | runs the masking engine on registered frames outside WBPP (dry run or in place, serial or threads) |
+| `scripts/StarlinkSweeper-PipelineBuilder.js` | WBPP pipeline builder of the masking option (no menu entry). **Generated, do not edit**: `tools/build_pipeline_builder.py` |
+| `scripts/StarlinkSweeperBuilderBody.js` | source of the builder: builds the pipeline, inserts the masking step, hands the copies to WBPP. Not packaged |
+| `scripts/StarlinkSweeperMaskEngine.js` | source of the builder, masking engine: detection per registered frame, masks, masked copies, coverage, threads. Not packaged |
+| `scripts/StarlinkSweeperMaskCore.js` | source of the builder, copy of ClarkeMask's `ClarkeMaskCore.js` (only the factory and namespace renamed): trail width, ends, mask drawing. Not packaged |
+| `tools/build_pipeline_builder.py` | concatenates the sources into the builder |
+| `tests/run_mask_pi.js` | runs the masking engine on registered frames outside WBPP (dry run or masked copies, serial or threads) |
 | `tests/compare_mask_runs.py` | compares two runs of `run_mask_pi.js` (reports and mask pixels) |
 | `tests/probe_mask_pi.js` | development probe: scan lines and ClarkeMask detection per direction, one JSON line per frame |
 | `tools/build_repo.py` | builds the PixInsight update repository into `docs/` |
@@ -25,14 +27,15 @@ packaged, installed or run by the script.
 | `README.md`, `README.fr.md` | English and French documentation, each linking to the other |
 | `CHANGELOG.md` | one entry per published version |
 
-The script runs on the V8 engine of PixInsight (`#engine v8`, PixInsight 1.9.4 and later). The
+The script runs on the V8 engine of PixInsight (`#engine v8`, PixInsight 1.9.6 and later). The
 PJSR classes (sizers, NumericControl, StdIcon, ...) are native: **do not `#include
 <pjsr/*.jsh>`**, those headers belong to the legacy SpiderMonkey runtime. Constants are properties
 of enumeration objects (`StdIcon.Warning`, `TextAlignment.Right`, `DataType.Int32`, ...), process
 constants are read without `.prototype` (`IntegerResample.Average`), and the dialog is a class
-extending `Dialog`. The update repository declares PixInsight 1.9.4 and later.
+extending `Dialog`. The update repository declares PixInsight 1.9.6 and later, the only version the
+WBPP pipeline builder is tested with.
 
-Parallel scan (PixInsight 1.9.5 and later): `scanFiles()` runs `analyseFile()` on `Thread`
+Parallel scan: `scanFiles()` runs `analyseFile()` on `Thread`
 objects, one frame per thread, each in a JavaScript runtime of its own where nothing of the script
 exists. The source of a scan thread is built by `threadSource()` from an explicit list of constants
 and functions: **any function or constant that `analyseFile()` comes to use must be added there**
@@ -73,11 +76,12 @@ in the HISTORY keyword of the masked frames).
    header of the script, add the CHANGELOG section, then build the update repository:
 
    ```bash
+   python3 tools/build_pipeline_builder.py
    python3 tools/build_repo.py --user jps-34
    ```
 
-   With signing (later), order matters: sign the five `scripts/*.js` files with **CodeSign**, run
-   `tools/build_repo.py`, sign `docs/updates.xri` last, then commit.
+   With signing (later), order matters: generate the builder, sign the three packaged `scripts/*.js`
+   files with **CodeSign**, run `tools/build_repo.py`, sign `docs/updates.xri` last, then commit.
 2. Pull request on the forge; after the merge into `main`, tag the merge commit:
 
    ```bash
@@ -94,13 +98,25 @@ Test of a development version in PixInsight: *Script > Execute Script File*, pic
 `scripts/StarlinkSweeper.js` in the local clone. The script runs without being installed; the
 installed version stays in place.
 
-## 5. Masking option (WBPP event script)
+## 5. Masking option (WBPP pipeline builder)
 
-Loading. In WBPP, `StarlinkSweeper-WBPP.js` evaluates `StarlinkSweeperCore.js` **inside a function**
-and keeps only the `StarlinkSweeperScan` object it ends with: the core declares many top-level
-names (`background`, `normalise`, `stage`, ...) that must not land in WBPP's global scope.
-`StarlinkSweeperMaskCore.js` and `StarlinkSweeperMaskEngine.js` define one namespace each and are
-evaluated globally. The dialog simply `#include`s the core.
+Loading. WBPP reads the builder as one text file and evaluates it from a class method (strict mode,
+inside a block, `engine` in scope), where `#include` is not available. `tools/build_pipeline_builder.py`
+therefore concatenates the sources, with `StarlinkSweeperCore.js` **inside a function** that keeps only
+the `StarlinkSweeperScan` object it ends with: the core declares many top-level names (`background`,
+`normalise`, `stage`, ...). Rerun the tool after any change to these sources, and commit its output. The
+dialog simply `#include`s the core.
+
+The pipeline. The builder calls `engine.pipelineManager.buildPipelineForLight()`, inserts a
+`BPPOperationBlock` after each `Registration` operation in `engine.operationQueue.operations` (then
+renumbers `__index__`), and appends a cleanup block. WBPP's frames move on through
+`processingSucceeded( step, path )`, which sets `current`; the drizzle path is derived from `current`,
+hence the copy of the `.xdrz` next to the masked copy and `addDrizzleFile()`. Only
+`buildPipelineForLight()` and `operationQueue` are shown in WBPP's example: check the rest at each
+WBPP version. The builder checks them itself before queuing anything (`checkWBPP()`), and the
+frames before handing them the copies (`checkFrames()`); a missing part stops the run. Add a tested
+version to `TESTED_WBPP` after a full validation with it. Do not untick *Image Integration* to run an integration of your own: WBPP would also
+drop the weights, drizzle and autocrop.
 
 Threads. A detection thread is built from `StarlinkSweeperScan.coreSource()` (the constants and
 functions listed in `coreSource()`, also used by the scan of the dialog), the source of
@@ -119,7 +135,7 @@ Refreshing the mask core from ClarkeMask: copy `scripts/ClarkeMaskCore.js`, rena
 
 Validation of a change to the masking:
 
-1. Registered frames: run WBPP once without event script (registration only is enough), keep its
+1. Registered frames: run WBPP once without the builder (registration only is enough), keep its
    `registered/` folder.
 2. Dry runs, serial and threaded, then compare (identical reports and mask pixels):
 
@@ -132,19 +148,25 @@ Validation of a change to the masking:
    ```
 
    Every frame with a visible trail must be masked, clean frames not; check the masks on a preview.
-3. A headless WBPP run with the event script (paths without commas):
+3. A headless WBPP run with the builder (paths without commas; `platesolve=false`, because plate
+   solving rewrites the metadata saved by ImageSolver in the settings):
 
    ```bash
    PixInsight.sh -n --automation-mode --no-startup-scripts \
      -r="<PixInsight>/src/scripts/BatchPreprocessing/WBPP.js,automationMode=true,dir=<lights>,\
-   outputDirectory=<output>,localNormalization=true,integrate=true,usePipelineScript=true,\
-   pipelineScriptFile=<clone>/scripts/StarlinkSweeper-WBPP.js" --force-exit
+   outputDirectory=<output>,localNormalization=true,integrate=true,platesolve=false,\
+   usePipelineBuilderScript=true,pipelineBuilderScriptFile=<clone>/scripts/StarlinkSweeper-PipelineBuilder.js" --force-exit
    ```
 
    Read `<output>/StarlinkSweeper/StarlinkSweeper.log`, and compare the masters with those of a run
-   without event script: along each masked trail, the perpendicular profile of the master (median
+   without the builder: along each masked trail, the perpendicular profile of the master (median
    along the trail, minus the background 150-250 px away) must show no peak above its uncertainty,
-   while the unmasked master shows one.
+   while the unmasked master shows one. The registered frames must not carry the `StarlinkSweeper`
+   HISTORY line, and only `.xdrz` and `.xnml` files must remain in `copies/`.
+
+   The automation has no drizzle option: to test drizzle, use a test builder that starts with
+   `engine.groupsManager.groupsForMode( BPP.GroupingMode.POST ).forEach( g => g.enableDrizzle() );`.
+   The WBPP cache must be tested interactively, with two identical runs.
 
 Notes: PixInsight does not follow symbolic links to frames; build test folders with hard links. In
 the `-r="script,arg,..."` argument, a `;` makes the automation instance hang (it waits forever):

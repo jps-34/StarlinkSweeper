@@ -1,9 +1,14 @@
 # StarlinkSweeper
 
-## MISE À JOUR 1.3.0 : masquage qui préserve le SNR
+**<ins>La version 1.4.0 change la méthode du masquage dans WBPP, et l'endroit où on le choisit. Il
+n'utilise plus d'Event Script : dans WBPP, onglet *Pipeline*, décocher *Event Script* et choisir
+`StarlinkSweeper-PipelineBuilder.js` dans *Pipeline builder* à la place. Les fichiers de WBPP ne sont
+plus modifiés.</ins>**
+
+## Masquage qui préserve le SNR
 
 > **Tes brutes traversées par une traînée n'ont plus à partir à la poubelle.** Avec WBPP, un
-> nouveau script d'événement garde les brutes traversées par une traînée de satellite et masque
+> pipeline builder garde les brutes traversées par une traînée de satellite et masque
 > seulement les pixels de la traînée, ailes comprises. Le reste de la brute entre toujours dans
 > l'intégration, donc le rapport signal sur bruit du master est presque intact, alors que la
 > quarantaine perd la brute en entier. C'est une grosse amélioration par rapport à la quarantaine,
@@ -13,7 +18,7 @@
 **Un script PixInsight qui trouve les brutes traversées par des traînées de satellites, pour les
 écarter de l'intégration.** Tu le pointes sur le dossier de tes brutes, tu lances le scan, tu
 vérifies chaque brute suspecte sur un aperçu avec la traînée tracée en rouge, puis tu la mets en
-quarantaine ou tu l'effaces. **Avec WBPP, tu peux aussi garder ces brutes** : un script d'événement
+quarantaine ou tu l'effaces. **Avec WBPP, tu peux aussi garder ces brutes** : un pipeline builder
 masque seulement les pixels de leurs traînées (voir *Masquage dans WBPP*).
 
 *Balaie les traînées que la constellation d'un certain milliardaire laisse sur tes brutes.*
@@ -45,8 +50,8 @@ l'option de masquage la garde et n'écarte que les pixels de la traînée, ailes
    binnée, son fond soustrait, puis parcourue à la recherche de lignes droites dans toutes les
    directions. Les flats, darks et bias présents dans l'arborescence sont reconnus à leur en-tête
    et ignorés : le dossier d'une nuit entière se scanne tel quel. Compter quelques secondes par
-   brute de 60 Mpx et par processeur : avec PixInsight 1.9.5, les brutes sont analysées en
-   parallèle (voir *Scan parallèle*).
+   brute de 60 Mpx et par processeur ; les brutes sont analysées en parallèle (voir *Scan
+   parallèle*).
 2. **Liste.** Les brutes dont la meilleure traînée atteint un score de 20 sont listées, la plus
    forte en premier, avec l'angle de la traînée et la fraction du champ qu'elle couvre ; à partir du
    niveau réglable *Red above*, elles passent en rouge. Un train Starlink apparaît comme plusieurs
@@ -70,8 +75,8 @@ scannés.
 
 | Fichier | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (boîte : scan, quarantaine) | 1.9.4 et suivants (1.9.5 pour le scan parallèle) |
-| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masquage dans WBPP) | 1.9.5 et suivants (WBPP 3.1 ou suivant ; testé avec WBPP 3.2.0 dans PixInsight 1.9.6) |
+| `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (boîte : scan, quarantaine) | 1.9.6 et suivants |
+| `scripts/StarlinkSweeper-PipelineBuilder.js`, un seul fichier autonome (masquage dans WBPP) | 1.9.6 et suivants ; testé avec WBPP 3.2.0 |
 
 Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 
@@ -89,9 +94,9 @@ Tant que le dépôt n'est pas signé, PixInsight ne l'accepte qu'avec la préfé
 
 ### Manuelle
 
-Télécharger **tous les fichiers de `scripts/`** dans le même dossier (la boîte inclut
-`StarlinkSweeperCore.js`, le script d'événement de WBPP charge les trois autres), puis soit exécuter
-`StarlinkSweeper.js` avec *Script > Execute Script
+Télécharger `StarlinkSweeper.js`, `StarlinkSweeperCore.js` (inclus par la boîte) et
+`StarlinkSweeper-PipelineBuilder.js` (à choisir dans WBPP, il n'a besoin de rien d'autre) depuis
+`scripts/` dans le même dossier, puis soit exécuter `StarlinkSweeper.js` avec *Script > Execute Script
 File*, soit ajouter son dossier avec *Script > Feature Scripts > Add* pour qu'il apparaisse dans le
 menu *Script > JPS*.
 
@@ -125,62 +130,59 @@ in WBPP* = *Masquage dans WBPP*.
 
 ## Scan parallèle
 
-Avec PixInsight 1.9.5 et suivants, les brutes sont analysées en parallèle dans PixInsight, une par
+Les brutes sont analysées en parallèle dans PixInsight, une par
 thread, et les résultats arrivent dans la liste au fil de l'eau ; les scores sont les mêmes qu'une
 brute à la fois. **Threads**, dans le cadre *Scanner* : **Auto** (par défaut) utilise autant de
 threads que de processeurs permis dans les préférences de PixInsight, moins si la mémoire disponible
-manque (chaque thread garde une brute en mémoire) ; **1** analyse une brute à la fois. Avec
-PixInsight 1.9.4, le scan se fait une brute à la fois. Rien à installer.
+manque (chaque thread garde une brute en mémoire) ; **1** analyse une brute à la fois. Rien à
+installer.
 
 ## Masquage dans WBPP (garder les brutes)
 
 Au lieu d'écarter une brute, WBPP peut la garder et n'écarter que les pixels de ses traînées.
 **C'est la méthode recommandée quand on empile avec WBPP** : une brute en quarantaine est perdue en
 entier et le rapport signal sur bruit du master baisse d'autant, alors qu'une brute masquée garde tout
-sauf ses traînées (en général 0,1 à 2 % de la brute) : le rapport signal sur bruit est presque intact
-(mesures ci-dessous). Pour l'instant, cela demande une intégration WBPP ; la quarantaine reste pour
-tout autre logiciel d'empilement.
+sauf ses traînées (en général une petite partie de la brute) : le rapport signal sur bruit est presque
+intact. Pour l'instant, cela demande une intégration WBPP ; la quarantaine reste pour tout autre
+logiciel d'empilement.
 
-1. Dans WBPP, onglet *Pipeline*, cocher **Event Script** et choisir `StarlinkSweeper-WBPP.js` dans
-   le dossier de StarlinkSweeper (le cadre *Masking in WBPP* de la boîte affiche son chemin).
+1. Dans WBPP, onglet *Pipeline*, cocher **Pipeline builder** et choisir
+   `StarlinkSweeper-PipelineBuilder.js` dans le dossier de StarlinkSweeper (le cadre *Masking in
+   WBPP* de la boîte affiche son chemin). Le panneau Pipeline montre alors une étape *StarlinkSweeper
+   masking* après chaque enregistrement.
 2. Lancer WBPP comme d'habitude, sur toutes les brutes : **ne pas** mettre en quarantaine les
    brutes empilées de cette façon.
 
-Juste après l'alignement, chaque brute de lumière alignée est scannée dans toutes les directions.
-Chaque traînée trouvée est masquée, ailes comprises, chaque satellite d'un train Starlink à part ;
-les pixels masqués passent à 0 dans la brute alignée, et l'intégration de WBPP les rejette (rejet
-par plage à 0, réglage par défaut des lumières). Chaque pixel est intégré à partir des brutes
-propres à cet endroit ; la brute garde tout le reste. La normalisation locale travaille ensuite sur
-les brutes masquées. Les brutes d'origine ne sont jamais touchées : seules les brutes alignées du dossier de
-sortie de WBPP sont modifiées.
+Le builder met en file le pipeline standard des lumières de WBPP et lui ajoute cette étape. Juste
+après l'alignement, chaque brute de lumière alignée est scannée dans toutes les directions. Chaque
+traînée trouvée est masquée, ailes comprises, chaque satellite d'un train Starlink à part. Une copie
+masquée de la brute, avec les pixels masqués à 0, est écrite dans
+`<sortie WBPP>/StarlinkSweeper/copies/`, et la suite du pipeline de WBPP (normalisation locale,
+intégration, drizzle) utilise cette copie. L'intégration de WBPP rejette ces pixels (rejet par plage
+à 0, réglage par défaut des lumières) : chaque pixel est intégré à partir des brutes propres à cet
+endroit, et la brute garde tout le reste. Les données drizzle de la copie marquent les pixels masqués
+comme rejetés. **Ni les brutes d'origine ni les fichiers de WBPP ne sont modifiés.** Une dernière
+étape supprime les copies d'images.
 
 Dans `<sortie WBPP>/StarlinkSweeper/` : le journal `StarlinkSweeper.log`, et pour chaque groupe de
 brutes un `<brute>_mask.xisf` compressé par brute masquée, `coverage.xisf` (part des brutes gardée
 en chaque pixel), `coverage.csv`, `frames.csv` (score, traînées et part masquée de chaque brute) et
-`trails.csv` (angle, longueur et largeur de chaque traînée masquée).
+`trails.csv` (angle, longueur et largeur de chaque traînée masquée). `copies/` garde les fichiers
+`.xdrz` et `.xnml` des brutes masquées.
 
-**Espace disque.** En plus des fichiers de WBPP : environ 0,1 Mo par brute masquée de 61 Mpx et
-environ 1 Mo par groupe (carte de couverture et rapports). Sur un jeu bande étroite de 76 brutes,
-0,5 à 0,85 Mo par filtre.
+**Espace disque.** Pendant le passage, une copie complète par brute masquée, supprimée à la fin.
+Après le passage, quelques dizaines de Mo au plus : masques compressés, cartes de couverture,
+rapports et fichiers `.xdrz` et `.xnml`.
 
-**Un seul script d'événement par passage de WBPP** : celui de StarlinkSweeper ou celui de
-ClarkeMask, pas les deux.
+**Contrôles de sécurité.** En plus de l'interface documentée du pipeline builder de WBPP, le builder
+s'appuie sur des parties de WBPP qui peuvent changer dans une future version : il les vérifie avant de
+mettre quoi que ce soit en file, et vérifie les brutes avant de leur passer les copies. Si quelque
+chose n'est pas comme prévu, ou si une brute ne peut pas être traitée, il arrête le passage avec un
+message dans la console, plutôt que de laisser WBPP intégrer des brutes non masquées. Son journal
+indique la version de WBPP ; une version autre que celle testée est signalée.
 
-Mesuré sur un jeu bande étroite brut (non calibré) de 76 brutes de 61 Mpx (H, S, O ; 300 s), WBPP
-3.1.2 avec normalisation locale : 9 brutes masquées, dont un train Starlink de sept traînées
-parallèles masqué sur 2,1 % de sa brute et 8 traînées isolées sur 0,1 à 0,2 % des leurs ; environ
-20 s par groupe de 23 à 27 brutes sur 28 processeurs. Dans les masters intégrés par WBPP avec
-toutes les brutes, les traînées laissaient une trace rectiligne faible le long de leur trajet (0,1 à
-0,2 σ du bruit du master par pixel, le genre de bande qu'un étirement fort révèle) ; avec le
-masquage, la trace disparaît (au niveau du bruit, comme avec des masques tracés à la main deux à
-trois fois plus larges) et le bruit des masters est inchangé. Deux traînées faibles que le scan de
-quarantaine des brutes non alignées avait manquées ont été trouvées et masquées.
-
-Sur un champ de galaxie riche en étoiles (109 brutes de luminance brutes de 61 Mpx, 150 s) : 53
-brutes masquées, chacune traversée par une vraie traînée (vérifié par un scan indépendant des
-brutes non alignées et sur des recadrages en pleine résolution), aucun faux positif trouvé ; en
-médiane 0,2 % d'une brute masqué, au plus 0,9 % ; 82 s pour les 109 brutes sur 28 processeurs,
-6,75 Mo de masques et de rapports.
+**Un seul pipeline builder par passage de WBPP.** À un deuxième passage avec les mêmes brutes,
+l'enregistrement vient du cache de WBPP, mais la normalisation locale est recalculée.
 
 ## Réglages
 
@@ -226,7 +228,7 @@ couvrant qu'une partie du champ ; `tests/make_synthetic_subs.py`) et sur de vrai
 les traînées sont détectées et les brutes propres restent largement sous le niveau de liste ; seul
 le cas limite des filaments brillants s'en approche.
 
-**Masquage (script d'événement de WBPP).** Sur chaque brute alignée, le scan ci-dessus tourne sur
+**Masquage (pipeline builder de WBPP).** Sur chaque brute alignée, le scan ci-dessus tourne sur
 la moyenne des canaux, en laissant de côté les blocs des bords d'alignement (pixels à 0), dont les
 bords seraient pris pour des lignes, et en gardant toutes les lignes. Les lignes candidates ont un
 score de 15 ou plus (la liste de la boîte commence à 20 : masquer quelques pixels coûte peu, une
@@ -249,9 +251,8 @@ ligne candidate sont masquées.
 * Masquage : une traînée doit couvrir environ un quart de la ligne qui la porte pour être trouvée (comme pour le
   scan) : une traînée courte est donc trouvée dans un coin, à partir d'environ un dixième du petit côté de
   l'image, mais pas en plein champ. Une traînée qui pâlit par endroits peut être masquée en morceaux, avec de courts
-  intervalles non masqués. Non testé avec l'intégration drizzle. La référence de normalisation
-  locale construite par WBPP à partir des brutes masquées n'a pas été vérifiée à part (les masters,
-  si).
+  intervalles non masqués. La référence de normalisation locale construite par WBPP à partir des
+  brutes masquées n'a pas été vérifiée à part (les masters, si).
 * ImageAnalysis (PixInsight 1.9.6) : avec le masquage, ne rejetez pas de brutes sur sa propriété `Trails`
   (par exemple `Trails < 1`) : elles seraient perdues au lieu d'être masquées. WBPP n'utilise pas cette
   propriété ; les autres mesures d'ImageAnalysis ne sont pas concernées.
@@ -262,7 +263,7 @@ ligne candidate sont masquées.
   le master. C'est un effet de bord du rejet de WBPP pour les petites piles, pas des masques (les
   pixels masqués sont bien rejetés). À partir de 15 brutes (rejet ESD), cet effet n'existe pas ;
   entre 7 et 14 brutes (Winsorized sigma clipping), il n'a pas été testé. Pour 6 brutes ou moins,
-  lancer WBPP sans le script d'événements.
+  lancer WBPP sans le pipeline builder.
 
 ## Licence
 

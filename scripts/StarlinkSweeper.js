@@ -6,7 +6,7 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.3.2
+ * StarlinkSweeper.js  v1.4.0
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,9 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.4.0: masking in WBPP through a pipeline builder, on copies of the registered
+ *   frames (StarlinkSweeper-PipelineBuilder.js), which checks the parts of WBPP it
+ *   relies on; the event script is removed. PixInsight 1.9.6 or later required.
  * v1.3.2: Export CSV works again; Return in an edit box runs no button.
  * v1.3.1: masking finds trails crossing a corner; the log states the data really
  *   lost; deprecated names replaced.
@@ -89,12 +92,12 @@
  *      saturated star is a diffraction spike and is rejected.
  */
 
-CoreApplication.ensureMinimumVersion( 1, 9, 4 );
+CoreApplication.ensureMinimumVersion( 1, 9, 6 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.3.2";
+var VERSION = "1.4.0";
 var SCRIPT_DIR = File.extractDrive(#__FILE__) + File.extractDirectory(#__FILE__);
-var EVENT_SCRIPT = SCRIPT_DIR + "/StarlinkSweeper-WBPP.js";   // masking option, run by WBPP
+var PIPELINE_BUILDER = SCRIPT_DIR + "/StarlinkSweeper-PipelineBuilder.js";   // masking option, selected in WBPP
 
 // Parameters, detection core, file reading and parallel scan: StarlinkSweeperCore.js
 #include "StarlinkSweeperCore.js"
@@ -364,13 +367,11 @@ constructor() {
    this.threadsSpin.toolTip = L("<p>Brutes analysées en même temps, une par thread. <b>Auto</b> (par défaut) : autant "
       + "que de processeurs permis dans les préférences de PixInsight, moins si la mémoire disponible manque (chaque "
       + "thread garde une brute en mémoire). <b>1</b> : une brute à la fois. Les scores sont les mêmes dans tous les "
-      + "cas.</p><p>Demande PixInsight 1.9.5 ; avant, l'analyse se fait une brute à la fois. Le masquage dans WBPP "
-      + "utilise aussi ce réglage.</p>",
+      + "cas.</p><p>Le masquage dans WBPP utilise aussi ce réglage.</p>",
       "<p>Frames analysed at the same time, one per thread. <b>Auto</b> (default): as many as "
       + "the processors allowed in the PixInsight preferences, fewer when the available memory is short (each "
       + "thread holds one frame). <b>1</b>: one frame at a time. The scores are the same either way.</p>"
-      + "<p>Needs PixInsight 1.9.5; with earlier versions the scan runs one frame at a time. The masking in WBPP "
-      + "uses this setting too.</p>");
+      + "<p>The masking in WBPP uses this setting too.</p>");
    this.threadsSpin.onValueUpdated = function (v) { self.threads = v; self.updateScannerUi(); };
    this.scannerStatus = new Label(this);
    this.scannerStatus.text = " ";
@@ -467,6 +468,14 @@ constructor() {
       + "(red level, options, threads, last folder). The results of the current scan are kept, and the language.</p>");
    this.resetButton.onClick = function () { self.resetSettings(); };
 
+   // PixInsight shrinks a push button below the width of its text when the row is
+   // short of room: each button gets at least the width of its own label.
+   var buttonPadding = this.logicalPixelsToPhysical(24), iconRoom = this.logicalPixelsToPhysical(20);
+   [this.quarantineButton, this.quarantineAllButton, this.quarantineRedButton, this.eraseButton,
+    this.openButton, this.csvButton, this.closeButton].forEach(function (b) {
+      b.setMinWidth(b.font.width(b.text) + buttonPadding + (b === self.eraseButton ? iconRoom : 0));
+   });
+
    var actionSizer = new HorizontalSizer;
    actionSizer.spacing = 6;
    actionSizer.add(this.resetButton);
@@ -513,51 +522,49 @@ constructor() {
    var wbppTip = L("<p><b>Le masquage est une nette amélioration sur la quarantaine.</b> Une brute en quarantaine est "
       + "perdue en entier, et le rapport signal sur bruit du master baisse d'autant. Avec le masquage, la brute est "
       + "gardée et seuls les pixels de ses traînées sont écartés de l'intégration (en général 0,1 à 2 % de la brute) : "
-      + "le rapport signal sur bruit est presque intact. Sur un jeu de test, la quarantaine augmentait le bruit des "
-      + "masters de 2 à 8 %, le masquage de rien de mesurable, et la trace des traînées disparaissait du master.</p>"
+      + "le rapport signal sur bruit est presque intact.</p>"
       + "<p><b>Pour l'instant, uniquement avec une intégration WBPP.</b> Dans WBPP, onglet <i>Pipeline</i>, cocher "
-      + "<i>Event Script</i> et choisir le fichier affiché ici, puis lancer WBPP avec toutes les brutes, sans "
+      + "<i>Pipeline builder</i> et choisir le fichier affiché ici, puis lancer WBPP avec toutes les brutes, sans "
       + "quarantaine.</p>"
       + "<p>Juste après l'alignement, chaque brute de lumière alignée est analysée dans toutes les directions ; chaque "
-      + "traînée trouvée (chaque satellite d'un train Starlink à part) est masquée avec ses ailes, les pixels masqués "
-      + "passent à 0 dans la brute alignée et l'intégration de WBPP les rejette. Les brutes d'origine ne sont jamais "
-      + "touchées ; seules les brutes alignées du dossier de sortie de WBPP sont modifiées.</p>"
-      + "<p><b>Espace disque :</b> en plus des fichiers de WBPP, un masque compressé par brute masquée (environ "
-      + "0,1 Mo pour 61 Mpx) et une carte de couverture par groupe (environ 1 Mo), dans "
-      + "<i>&lt;sortie WBPP&gt;/StarlinkSweeper/</i>, avec le journal et les rapports CSV.</p>"
-      + "<p><b>Un seul script d'événement par passage de WBPP :</b> celui-ci ou celui de ClarkeMask, pas les deux.</p>",
+      + "traînée trouvée (chaque satellite d'un train Starlink à part) est masquée avec ses ailes. Une copie masquée "
+      + "de la brute, avec des pixels à 0, est écrite dans le dossier de StarlinkSweeper : la suite du pipeline de WBPP "
+      + "l'utilise, et l'intégration rejette ces pixels. Ni les brutes d'origine ni les fichiers de WBPP ne sont "
+      + "modifiés.</p>"
+      + "<p><b>Espace disque :</b> pendant le passage, une copie complète par brute masquée, supprimée à la fin. "
+      + "Restent un masque compressé par brute masquée, une carte de couverture par groupe, le journal et les rapports "
+      + "CSV, dans <i>&lt;sortie WBPP&gt;/StarlinkSweeper/</i>.</p>"
+      + "<p><b>Un seul pipeline builder par passage de WBPP.</b></p>",
       "<p><b>Masking is a clear improvement over quarantine.</b> A quarantined frame is lost entirely, and the "
       + "signal-to-noise ratio of the master drops accordingly. With masking, the frame is kept and only the pixels "
       + "of its trails are left out of the integration (usually 0.1 to 2 % of the frame): the signal-to-noise ratio "
-      + "is almost untouched. On a test set, quarantine raised the noise of the masters by 2 to 8 %, masking by "
-      + "nothing measurable, and the trace of the trails was gone from the master.</p>"
-      + "<p><b>For now, only with a WBPP integration.</b> In WBPP, <i>Pipeline</i> tab, tick <i>Event Script</i> "
+      + "is almost untouched.</p>"
+      + "<p><b>For now, only with a WBPP integration.</b> In WBPP, <i>Pipeline</i> tab, tick <i>Pipeline builder</i> "
       + "and select the file shown here, then run WBPP with all your frames, nothing quarantined.</p>"
       + "<p>Right after registration, every registered light frame is scanned in every direction; each trail found "
-      + "(each member of a Starlink train separately) is masked with its wings, the masked pixels are set to 0 in "
-      + "the registered frame and WBPP's integration rejects them. The source frames are never touched; only the "
-      + "registered frames of the WBPP output folder are modified.</p>"
-      + "<p><b>Disk space:</b> besides WBPP's own files, one compressed mask file per masked frame (about 0.1 MB "
-      + "for 61 Mpx) and one coverage map per group (about 1 MB), in <i>&lt;WBPP output&gt;/StarlinkSweeper/</i>, "
-      + "with the log and CSV reports.</p>"
-      + "<p><b>One event script per WBPP run:</b> this one or ClarkeMask's, not both.</p>");
+      + "(each member of a Starlink train separately) is masked with its wings. A masked copy of the frame, with "
+      + "pixels at 0, is written to the StarlinkSweeper folder: the rest of WBPP's pipeline uses it, and integration "
+      + "rejects those pixels. Neither the source frames nor WBPP's files are modified.</p>"
+      + "<p><b>Disk space:</b> during the run, one full copy per masked frame, removed at the end. One compressed "
+      + "mask file per masked frame, one coverage map per group, the log and CSV reports stay in "
+      + "<i>&lt;WBPP output&gt;/StarlinkSweeper/</i>.</p>"
+      + "<p><b>One pipeline builder per WBPP run.</b></p>");
    this.wbppLabel = new Label(this);
    this.wbppLabel.useRichText = true;
    this.wbppLabel.wordWrapping = true;
    this.wbppLabel.text = L("<b>Mieux que la quarantaine :</b> les brutes traversées par une traînée sont gardées et "
       + "seule la traînée est masquée, donc le rapport signal sur bruit du master est presque intact (une brute en "
       + "quarantaine est perdue en entier). <b>Pour l'instant uniquement avec une intégration WBPP</b> : dans WBPP, "
-      + "<i>Pipeline &gt; Event Script</i>, choisir ce fichier, puis lancer WBPP avec toutes les brutes. Peu d'espace "
-      + "disque (environ 0,1 Mo par brute masquée). Pas en même temps que le script d'événement de ClarkeMask.",
+      + "<i>Pipeline &gt; Pipeline builder</i>, choisir ce fichier, puis lancer WBPP avec toutes les brutes. Pendant le "
+      + "passage, prévoir l'espace disque d'une copie par brute masquée.",
       "<b>Better than quarantine:</b> the frames crossed by a trail are kept and only the trail is masked, so the "
       + "signal-to-noise ratio of the master is almost untouched (a quarantined frame is lost entirely). <b>For now "
-      + "only with a WBPP integration</b>: in WBPP, <i>Pipeline &gt; Event Script</i>, select this file, then run "
-      + "WBPP with all your frames. Little disk space (about 0.1 MB per masked frame). Not together with "
-      + "ClarkeMask's event script.");
+      + "only with a WBPP integration</b>: in WBPP, <i>Pipeline &gt; Pipeline builder</i>, select this file, then run "
+      + "WBPP with all your frames. During the run, allow disk space for one copy per masked frame.");
    this.wbppLabel.toolTip = wbppTip;
    this.wbppEdit = new Edit(this);
    this.wbppEdit.readOnly = true;
-   this.wbppEdit.text = EVENT_SCRIPT;
+   this.wbppEdit.text = PIPELINE_BUILDER;
    this.wbppEdit.toolTip = wbppTip;
    this.wbppBox = new GroupBox(this);
    this.wbppBox.title = L("Masquage dans WBPP (recommandé)", "Masking in WBPP (recommended)");

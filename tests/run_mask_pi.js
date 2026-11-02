@@ -1,12 +1,13 @@
 #engine v8
-// Runs the masking engine on a list of registered frames, outside WBPP, with
-// the files loaded the way StarlinkSweeper-WBPP.js loads them.
+// Maintenance test, not part of the product: runs the masking engine on a list
+// of registered frames, outside WBPP, with the source files of the builder.
 //
 //   PixInsight.sh -n --automation-mode --no-startup-scripts \
 //     -r="<clone>/tests/run_mask_pi.js,<output dir>,<mode>,<threads>,<frame1>,<frame2>,..." --force-exit
 //
-// mode: "dry" (masks and reports only, frames untouched) or "mask" (frames
-// masked IN PLACE: give copies). threads: 0 = automatic, 1 = serial. Writes
+// mode: "dry" (masks and reports only) or "mask" (masked copies written to
+// <output dir>/copies). The frames are not modified. threads: 0 = automatic,
+// 1 = serial. Writes
 // <output dir>/run.jsonl (one line per frame, then a summary) next to the
 // engine's own reports. Paths without commas.
 
@@ -21,6 +22,7 @@ var outDir = args[0], mode = args[1], threads = parseInt( args[2] ), files = arg
 var res = StarlinkSweeperMaskEngine.processGroup( files, {
    outputDir: outDir,
    dryRun: mode != "mask",
+   copyDir: mode == "mask" ? outDir + "/copies" : "",
    threads: threads,
    log: function( s ) { log.push( s ); console.writeln( "StarlinkSweeper: " + s ); }
 } );

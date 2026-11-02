@@ -1,8 +1,13 @@
 # StarlinkSweeper
 
-## UPDATE 1.3.0: SNR-preserving masking
+**<ins>Version 1.4.0 changes the method of the masking in WBPP, and where it is selected. It no
+longer uses an Event Script: in WBPP, *Pipeline* tab, untick *Event Script* and select
+`StarlinkSweeper-PipelineBuilder.js` under *Pipeline builder* instead. WBPP's own files are no longer
+modified.</ins>**
 
-> **Your trailed frames no longer have to be thrown away.** With WBPP, a new event script keeps the
+## SNR-preserving masking
+
+> **Your trailed frames no longer have to be thrown away.** With WBPP, a pipeline builder keeps the
 > frames crossed by a satellite trail and masks only the pixels of the trail, wings included. The
 > rest of the frame still goes into the integration, so the signal-to-noise ratio of the master is
 > almost untouched, where the quarantine loses the whole frame. This is a big improvement over the
@@ -12,7 +17,7 @@
 **A PixInsight script that finds the light frames crossed by satellite trails, so you can leave
 them out of the integration.** Point it at the folder of your subs, scan, check each suspect frame
 on a preview with the trail drawn in red, then quarantine it or erase it. **With WBPP, you can also
-keep those frames**: an event script masks only the pixels of their trails (see *Masking in WBPP*).
+keep those frames**: a pipeline builder masks only the pixels of their trails (see *Masking in WBPP*).
 
 *Sweeps away the trails a certain billionaire's constellation leaves on your subs.*
 
@@ -41,8 +46,8 @@ masking option keeps it and leaves out only the pixels of the trail, wings inclu
 1. **Scan.** Every FITS / XISF light frame of the chosen folder (sub-folders included) is binned,
    background-subtracted and searched for straight lines in every direction. Flats, darks and bias
    found in the tree are recognised from their header and skipped, so a whole night's folder can be
-   scanned as it is. Expect a few seconds per 60 Mpx frame and per processor: with PixInsight 1.9.5
-   the frames are analysed in parallel (see *Parallel scan*).
+   scanned as it is. Expect a few seconds per 60 Mpx frame and per processor; the frames are analysed in
+   parallel (see *Parallel scan*).
 2. **List.** Frames whose best trail scores 20 or more are listed, strongest first, with the angle
    of the trail and the fraction of the frame it covers; from the adjustable *Red above* level they
    are shown in red. A Starlink train shows as several parallel lines at the same angle.
@@ -63,8 +68,8 @@ frames themselves; quarantine folders (names ending with `_trails`) are never sc
 
 | File | PixInsight |
 |---|---|
-| `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (dialog: scan, quarantine) | 1.9.4 and later (1.9.5 for the parallel scan) |
-| `scripts/StarlinkSweeper-WBPP.js` + `StarlinkSweeperCore.js`, `StarlinkSweeperMaskCore.js`, `StarlinkSweeperMaskEngine.js` (masking in WBPP) | 1.9.5 and later (WBPP 3.1 or later; tested with WBPP 3.2.0 in PixInsight 1.9.6) |
+| `scripts/StarlinkSweeper.js` + `scripts/StarlinkSweeperCore.js` (dialog: scan, quarantine) | 1.9.6 and later |
+| `scripts/StarlinkSweeper-PipelineBuilder.js`, one self-contained file (masking in WBPP) | 1.9.6 and later; tested with WBPP 3.2.0 |
 
 Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 
@@ -82,11 +87,10 @@ Until the repository is code-signed, PixInsight only accepts it with the
 
 ### Manual
 
-Download **all the files of `scripts/`** into the same folder (the dialog includes
-`StarlinkSweeperCore.js`, the WBPP event script loads the three others), then either run
-`StarlinkSweeper.js` with *Script > Execute Script File*, or
-add its folder with *Script > Feature Scripts > Add* so it shows up in the *Script > JPS*
-menu.
+Download `StarlinkSweeper.js`, `StarlinkSweeperCore.js` (included by the dialog) and
+`StarlinkSweeper-PipelineBuilder.js` (selected in WBPP, needs nothing else) from `scripts/` into the
+same folder, then either run `StarlinkSweeper.js` with *Script > Execute Script File*, or add its
+folder with *Script > Feature Scripts > Add* so it shows up in the *Script > JPS* menu.
 
 ## Quick start
 
@@ -109,55 +113,54 @@ language and keeps the results of the scan. The console and the CSV report stay 
 
 ## Parallel scan
 
-With PixInsight 1.9.5 and later, the frames are analysed in parallel inside PixInsight, one per
+The frames are analysed in parallel inside PixInsight, one per
 thread, and the results stream into the list as they come; the scores are the same as one frame at
 a time. **Threads**, in the *Scanner* box: **Auto** (default) uses as many threads as the
 processors allowed in the PixInsight preferences, fewer when the available memory is short (each
-thread holds one frame); **1** analyses one frame at a time. With PixInsight 1.9.4 the scan runs one
-frame at a time. Nothing to install.
+thread holds one frame); **1** analyses one frame at a time. Nothing to install.
 
 ## Masking in WBPP (keep the frames)
 
 Instead of setting a frame aside, WBPP can keep it and leave out only the pixels of its trails.
 **This is the recommended way when you stack with WBPP**: a quarantined frame is lost entirely and the
 signal-to-noise ratio of the master drops accordingly, while a masked frame keeps everything but its
-trails (usually 0.1 to 2 % of the frame), so the signal-to-noise ratio is almost untouched (measured
-below). For now it needs a WBPP integration; the quarantine remains for any other stacking software.
+trails (usually a small part of the frame), so the signal-to-noise ratio is almost untouched. For now
+it needs a WBPP integration; the quarantine remains for any other stacking software.
 
-1. In WBPP, *Pipeline* tab, tick **Event Script** and select `StarlinkSweeper-WBPP.js` in the
-   StarlinkSweeper folder (the *Masking in WBPP* box of the dialog shows its path).
+1. In WBPP, *Pipeline* tab, tick **Pipeline builder** and select
+   `StarlinkSweeper-PipelineBuilder.js` in the StarlinkSweeper folder (the *Masking in WBPP* box of
+   the dialog shows its path). The Pipeline panel then shows a *StarlinkSweeper masking* step after
+   each registration.
 2. Run WBPP as usual, on all your lights: do **not** quarantine the frames you stack this way.
 
-Right after registration, every registered light frame is scanned in every direction. Each trail
-found is masked, wings included, each member of a Starlink train separately; the masked pixels are
-set to 0 in the registered frame, and WBPP's integration rejects them (range rejection at 0, the
-default for lights). Each pixel is integrated from the frames that are clean there; the frame keeps
-everything else. Local normalization then works on the masked frames. Your source frames are never touched:
-only the registered frames of the WBPP output folder are modified.
+The builder queues WBPP's standard light pipeline and adds this step to it. Right after registration,
+every registered light frame is scanned in every direction. Each trail found is masked, wings
+included, each member of a Starlink train separately. A masked copy of the frame, with the masked
+pixels at 0, is written to `<WBPP output>/StarlinkSweeper/copies/`, and the next steps of WBPP's
+pipeline (local normalization, integration, drizzle) use this copy. WBPP's integration rejects those
+pixels (range rejection at 0, the default for lights): each pixel is integrated from the frames that
+are clean there, and the frame keeps everything else. The drizzle data of the copy records the masked
+pixels as rejected. **Neither your source frames nor WBPP's files are modified.** A last step removes
+the image copies.
 
 In `<WBPP output>/StarlinkSweeper/`: the log `StarlinkSweeper.log`, and per group of frames one
 compressed `<frame>_mask.xisf` per masked frame, `coverage.xisf` (fraction of the frames kept at
 each pixel), `coverage.csv`, `frames.csv` (score, trails and masked fraction of every frame) and
-`trails.csv` (angle, length and width of every masked trail).
+`trails.csv` (angle, length and width of every masked trail). `copies/` keeps the `.xdrz` and `.xnml`
+files of the masked frames.
 
-**Disk space.** Besides WBPP's own files: about 0.1 MB per masked 61 Mpx frame and about 1 MB per
-group (coverage map and reports). On a 76-frame narrowband set, 0.5 to 0.85 MB per filter.
+**Disk space.** During the run, one full copy per masked frame, removed at the end. After the run,
+a few tens of MB at most: compressed masks, coverage maps, reports and the `.xdrz` and `.xnml` files.
 
-**One event script per WBPP run**: StarlinkSweeper's or ClarkeMask's, not both.
+**Safety checks.** Besides the documented interface of WBPP's pipeline builder, the builder relies on
+parts of WBPP that may change in a future version: it checks them before queuing anything, and
+checks the frames before handing them the copies. If something is not as expected, or if a frame
+cannot be processed, it stops the run with a message in the console, rather than letting WBPP
+integrate unmasked frames. Its log names the version of WBPP; a version other than the tested one
+is reported.
 
-Measured on a raw (uncalibrated) narrowband set of 76 frames of 61 Mpx (H, S, O; 300 s), WBPP 3.1.2
-with local normalization: 9 frames masked, among them a Starlink train of seven parallel trails
-masked on 2.1 % of its frame and 8 single trails on 0.1 to 0.2 % of theirs; about 20 s per group of
-23 to 27 frames on 28 processors. In the masters integrated by WBPP from all the frames, the trails
-left a faint straight trace along their path (0.1 to 0.2 σ of the master's noise per pixel, the kind
-of band a hard stretch reveals); with the masking, the trace is gone (at the noise level, like with
-masks drawn by hand two to three times wider) and the noise of the masters is unchanged. Two faint
-trails that the quarantine scan of the unregistered frames had missed were found and masked.
-
-On a galaxy field rich in stars (109 raw luminance frames of 61 Mpx, 150 s): 53 frames masked, each
-one crossed by a real trail (checked against an independent scan of the unregistered frames and on
-full-resolution crops), no false positive found; a median of 0.2 % of a frame masked, at most 0.9 %;
-82 s for the 109 frames on 28 processors, 6.75 MB of masks and reports.
+**One pipeline builder per WBPP run.** On a second run with the same frames, registration comes from
+WBPP's cache, while local normalization is computed again.
 
 ## Settings
 
@@ -199,7 +202,7 @@ covering only part of the frame; `tests/make_synthetic_subs.py`) and on real sub
 detected and clean frames stay well below the listing level; only the bright-filament stress case
 comes near it.
 
-**Masking (WBPP event script).** On each registered frame, the scan above runs on the mean of the
+**Masking (WBPP pipeline builder).** On each registered frame, the scan above runs on the mean of the
 channels with the bins of the registration borders (pixels at 0) left out, so that their edges are
 not taken for lines, and with every line kept. Candidate lines score 15 or more (the list of the
 dialog starts at 20: masking a few pixels costs little, a trail left in costs a band in the
@@ -221,9 +224,8 @@ a candidate line are masked.
 * Masking: a trail must span about a quarter of the line it lies on to be found (as for the scan), so a
   short trail is found in a corner, from about a tenth of the smaller image side, and not in the middle of
   the frame. A trail
-  that fades in places can be masked in pieces, with short unmasked gaps. Not tested with drizzle
-  integration. The local normalization reference built by WBPP from the masked frames has not been
-  checked on its own (the masters were).
+  that fades in places can be masked in pieces, with short unmasked gaps. The local normalization
+  reference built by WBPP from the masked frames has not been checked on its own (the masters were).
 * ImageAnalysis (PixInsight 1.9.6): with the masking, do not reject frames on its `Trails` property
   (for example `Trails < 1`): those frames would be lost instead of masked. WBPP does not use this
   property; the other measurements of ImageAnalysis are not affected.
@@ -234,7 +236,7 @@ a candidate line are masked.
   is a side effect of WBPP's rejection for small stacks, not of the masks (the masked pixels are
   rejected). With 15 frames or more (ESD rejection) there is no such effect; between 7 and 14 frames
   (Winsorized sigma clipping) it has not been tested. For 6 frames or fewer, run WBPP without the
-  event script.
+  pipeline builder.
 
 ## License
 

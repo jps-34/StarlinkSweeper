@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.0 (2026-11-02)
+* **Masking in WBPP now goes through a pipeline builder**, `StarlinkSweeper-PipelineBuilder.js`: one
+  self-contained file, selected in WBPP under *Pipeline > Pipeline builder*. It queues WBPP's standard
+  light pipeline and inserts a masking step after each registration. The trails are masked in copies
+  of the registered frames, which the next steps of the pipeline use; **WBPP's own files are no longer
+  modified**, its cache keeps recognising them, and drizzle integration receives the masked pixels as
+  rejected. The image copies are removed at the end of the run.
+* **The event script `StarlinkSweeper-WBPP.js` is removed.** If you used it, untick *Event Script* in
+  WBPP and select the builder instead: without it, WBPP only warns about the missing file and nothing
+  is masked.
+* Disk space: the run now needs one full copy per masked frame while it lasts.
+* The builder checks the parts of WBPP it relies on before queuing anything, and the frames before
+  handing them the copies; if something is not as expected, or a frame cannot be processed, it stops
+  the run with a message instead of letting WBPP integrate unmasked frames. Its log names the version
+  of WBPP.
+* **PixInsight 1.9.6 or later is required**, the only version tested with the builder (WBPP 3.2.0).
+  With an earlier version, the update repository keeps offering 1.3.2.
+* Dialog: the *Masking in WBPP* box gives the path of the builder; the buttons are no longer cut when
+  the window is narrow.
+
 ## 1.3.2 (2026-10-30)
 * README (English and French): the masking in WBPP is announced from PixInsight 1.9.5, whose WBPP calls the
   event functions it uses; it was announced from 1.9.4 without having been tested there.

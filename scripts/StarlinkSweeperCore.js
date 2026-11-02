@@ -9,9 +9,10 @@
  *
  * Detection core of StarlinkSweeper: parameters, numeric analysis of a frame,
  * file reading and the parallel scan on threads. No dialog here: the dialog
- * script (StarlinkSweeper.js) includes this file, and the WBPP event script
- * loads it with an indirect eval, where #include is not available; so this
- * file has no #include and only top-level var and function declarations.
+ * script (StarlinkSweeper.js) includes this file, and
+ * tools/build_pipeline_builder.py concatenates it into the WBPP pipeline
+ * builder, where #include is not available; so this file has no #include and
+ * only top-level var and function declarations.
  */
 
 // ---------------------------------------------------------------- parameters
@@ -690,9 +691,9 @@ function scanFiles(files, lightsOnly, threads, onResult, abort) {
 }
 
 // ------------------------------------------------------------- namespace
-// What the masking engine uses. The WBPP event script loads this file inside a
-// function, so that its many top-level names stay out of WBPP's global scope,
-// and keeps only this object.
+// What the masking engine uses. The WBPP pipeline builder holds this file inside
+// a function, so that its many top-level names stay out of WBPP's scope, and
+// keeps only this object.
 var StarlinkSweeperScan = {
    FINE_BIN: FINE_BIN,
    binMeanNoData: binMeanNoData,
