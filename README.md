@@ -82,12 +82,14 @@ Input: FITS or XISF light frames, mono or CFA (read raw), calibrated or not.
 2. *Resources > Updates > Check for Updates*, then restart PixInsight.
 3. The script appears under *Script > JPS > StarlinkSweeper* (*Script > Utilities* up to 1.2.1).
 
-Until the repository is code-signed, PixInsight only accepts it with the
-*Allow unsigned update repositories* security preference enabled.
+The repository and the script are signed with my Certified PixInsight Developer identity, `jps-34`.
+If PixInsight reports an **unknown code signing identity** when you add the repository, install the
+PixInsight update first (*Resources > Updates > Check for Updates*, then restart PixInsight): it
+brings the database of certified developers that includes `jps-34`. Then check for updates again.
 
 ### Manual
 
-Download `StarlinkSweeper.js`, `StarlinkSweeperCore.js` (included by the dialog) and
+Download `StarlinkSweeper.js` with its signature `StarlinkSweeper.xsgn`, `StarlinkSweeperCore.js` (included by the dialog) and
 `StarlinkSweeper-PipelineBuilder.js` (selected in WBPP, needs nothing else) from `scripts/` into the
 same folder, then either run `StarlinkSweeper.js` with *Script > Execute Script File*, or add its
 folder with *Script > Feature Scripts > Add* so it shows up in the *Script > JPS* menu.

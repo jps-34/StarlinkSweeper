@@ -89,12 +89,15 @@ Entrée : brutes FITS ou XISF, mono ou CFA (lues brutes), calibrées ou non.
 2. *Resources > Updates > Check for Updates*, puis redémarrer PixInsight.
 3. Le script apparaît dans *Script > JPS > StarlinkSweeper* (*Script > Utilities* jusqu'à la 1.2.1).
 
-Tant que le dépôt n'est pas signé, PixInsight ne l'accepte qu'avec la préférence de sécurité
-*Allow unsigned update repositories* activée.
+Le dépôt et le script sont signés avec mon identité de développeur certifié PixInsight, `jps-34`.
+Si PixInsight signale une **identité de signature inconnue** (*unknown code signing identity*) à
+l'ajout du dépôt, installer d'abord la mise à jour de PixInsight (*Resources > Updates > Check for
+Updates*, puis redémarrer PixInsight) : elle apporte la base des développeurs certifiés qui contient
+`jps-34`. Puis relancer la recherche de mises à jour.
 
 ### Manuelle
 
-Télécharger `StarlinkSweeper.js`, `StarlinkSweeperCore.js` (inclus par la boîte) et
+Télécharger `StarlinkSweeper.js` avec sa signature `StarlinkSweeper.xsgn`, `StarlinkSweeperCore.js` (inclus par la boîte) et
 `StarlinkSweeper-PipelineBuilder.js` (à choisir dans WBPP, il n'a besoin de rien d'autre) depuis
 `scripts/` dans le même dossier, puis soit exécuter `StarlinkSweeper.js` avec *Script > Execute Script
 File*, soit ajouter son dossier avec *Script > Feature Scripts > Add* pour qu'il apparaisse dans le

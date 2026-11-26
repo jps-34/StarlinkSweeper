@@ -37,7 +37,7 @@ var StarlinkSweeperMaskEngine = ( function()
 {
    "use strict";
 
-   var VERSION = "1.5.0";
+   var VERSION = "1.5.1";
    var NO_SWAP_FILE = 0xFFFFFFFF;    // UndoFlag_NoSwapFile
    var MASK_HINTS = "compression-codec zlib+sh";
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+PixInsight XML Code Signature Format - XSGN version 1.0
+Created with PixInsight software - https://pixinsight.com/
+-->
+<xsgn version="1.0" xmlns="http://www.pixinsight.com/xsgn" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.pixinsight.com/xsgn http://pixinsight.com/xsgn/xsgn-1.0.xsd">
+   <CreationTime>2026-11-26T21:16:23.162Z</CreationTime>
+   <Signature version="1.0" scriptId="StarlinkSweeper" developerId="jps-34">
+      <Timestamp>2026-11-26T21:16:23.162Z</Timestamp>
+      <CodeSignature encoding="Base64">ywbEhZxl907fYfsurD4+CDh66b7P4exkQbF2w6ouTEuR/eGUyT6SR3ZbLuFDeQs7wE+lDBBKKZ4JpK/5DAF+AQ==</CodeSignature>
+   </Signature>
+</xsgn>

@@ -5,8 +5,8 @@
       <p>Add https://jps-34.github.io/StarlinkSweeper/ under Resources &gt; Updates &gt; Manage Repositories.</p>
    </description>
    <platform os="all" arch="noarch" version="1.9.6:1.9.99">
-      <package fileName="StarlinkSweeper-1.5.0-PI196.zip" sha1="564098a6790119feef1d62ee97498d39ec875195" type="script" releaseDate="20261126" serverURL="https://jps-34.github.io/StarlinkSweeper/">
-         <title>StarlinkSweeper 1.5.0 (PixInsight 1.9.6 and later)</title>
+      <package fileName="StarlinkSweeper-1.5.1-PI196.zip" sha1="a54d905be5fbdea285246fff5f454c803198fc37" type="script" releaseDate="20261126" serverURL="https://jps-34.github.io/StarlinkSweeper/">
+         <title>StarlinkSweeper 1.5.1 (PixInsight 1.9.6 and later)</title>
          <description>
             <p>Scans a folder tree of light frames (FITS / XISF) for satellite, Starlink train and aircraft trails, lists the affected frames with a score, shows each detection on a preview, and lets you quarantine (move to a &lt;folder&gt;_trails folder next to the scanned one) or erase them one by one with confirmation. With WBPP, the frames can be kept instead: the pipeline builder StarlinkSweeper-PipelineBuilder.js masks only the pixels of the trails, in copies of the registered frames. Parallel scan on all the processors. Installs under Script &gt; JPS &gt; StarlinkSweeper.</p>
             <p>Copyright (c) 2026 Jacques Pouyaud. GNU GPL v3 or later. Source: https://github.com/jps-34/StarlinkSweeper</p>
@@ -14,3 +14,4 @@
       </package>
    </platform>
 </xri>
+<Signature developerId="jps-34" timestamp="2026-11-26T21:20:35.428Z" encoding="Base64">XE/4xQOe4nXCZRbu2M/DzsQerTriOJfy6eF6WY/1RtWtMfnTUQyQyk3Kv+yWd4hDXG+eHGZI8n9wcbo3yIEhCg==</Signature>

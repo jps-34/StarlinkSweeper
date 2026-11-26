@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1 (2026-11-26)
+* The script and its update repository are signed with my Certified PixInsight Developer identity,
+  `jps-34`. No change to the behaviour. If PixInsight reports an unknown code signing identity,
+  install the PixInsight update first (*Resources > Updates > Check for Updates*, then restart).
+
 ## 1.5.0 (2026-11-26)
 * **New profile test of the detected lines**, after the idea of the trail measurement of PixInsight's
   ImageAnalysis process: across each line, the profile of the pixels must peak above each side taken

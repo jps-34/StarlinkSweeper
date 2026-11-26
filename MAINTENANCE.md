@@ -81,8 +81,12 @@ in the HISTORY keyword of the masked frames).
    python3 tools/build_repo.py --user jps-34
    ```
 
-   With signing (later), order matters: generate the builder, sign the three packaged `scripts/*.js`
-   files with **CodeSign**, run `tools/build_repo.py`, sign `docs/updates.xri` last, then commit.
+   Signed releases (CPD identity `jps-34`, since 1.5.1), order matters: generate the builder, sign `scripts/StarlinkSweeper.js`
+   with **CodeSign**, run `tools/build_repo.py`, sign `docs/updates.xri` last, then commit. Only the
+   main script is signed: `StarlinkSweeperCore.js` is included by it (`#include`), so its signature
+   covers the core, and the pipeline builder is evaluated by WBPP, which checks no signature. Before
+   committing, run the signed script in PixInsight and check that its signature is verified: a
+   `.xsgn` left from an older content would make PixInsight refuse the script for every user.
 2. Pull request on the forge; after the merge into `main`, tag the merge commit:
 
    ```bash

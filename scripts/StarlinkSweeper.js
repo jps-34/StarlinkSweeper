@@ -6,7 +6,7 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.5.0
+ * StarlinkSweeper.js  v1.5.1
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,7 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.5.1: signed with the CPD identity jps-34; no change to the behaviour.
  * v1.5.0: profile test of the detected lines (edges and wide structures are no
  *   longer taken for trails); the pipeline builder stops the run when WBPP's
  *   automatic integration mode switches a light group to fast integration, and
@@ -103,7 +104,7 @@
 CoreApplication.ensureMinimumVersion( 1, 9, 6 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.5.0";
+var VERSION = "1.5.1";
 var SCRIPT_DIR = File.extractDrive(#__FILE__) + File.extractDirectory(#__FILE__);
 var PIPELINE_BUILDER = SCRIPT_DIR + "/StarlinkSweeper-PipelineBuilder.js";   // masking option, selected in WBPP
 
