@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.0 (2026-11-26)
+* **New profile test of the detected lines**, after the idea of the trail measurement of PixInsight's
+  ImageAnalysis process: across each line, the profile of the pixels must peak above each side taken
+  separately and be thin. Edges and wide structures of nebulae, clouds and glows are no longer taken
+  for trails; a second trail next to the line (satellite train, aircraft lights) is still accepted.
+  Faint trails keep their scores: the test only drops lines, it never lowers the score of a line it
+  keeps. On clean frames, the weak lines left by noise are dropped too, so their scores go down.
+* The masking in WBPP uses the same detection: candidates that the confirmation of each trail already
+  rejected are now dropped earlier.
+* **Fast integration groups are no longer left unmasked without a word.** Fast integration has no
+  registration step, so the builder cannot mask its frames. WBPP's *Automatic integration mode*, on by
+  default, switches every light group of 200 frames or more to fast integration: such a group now
+  stops the run before anything is calibrated, with a message naming the groups. Uncheck the option,
+  or set the integration mode of the group yourself: fast integration set by hand is accepted with a
+  warning, and the other groups are masked.
+* When the builder stops a run, it now does so before WBPP calibrates the bias, dark and flat frames,
+  removes the masked copies already written, and writes its log; the stop used to cancel both.
+* The folders of the groups (`StarlinkSweeper/groupNN`, `copies/groupNN`) are numbered in the order the
+  groups are masked; they were numbered backwards, `group01` being the last group.
+
 ## 1.4.0 (2026-11-02)
 * **Masking in WBPP now goes through a pipeline builder**, `StarlinkSweeper-PipelineBuilder.js`: one
   self-contained file, selected in WBPP under *Pipeline > Pipeline builder*. It queues WBPP's standard

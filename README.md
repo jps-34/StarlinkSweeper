@@ -159,6 +159,13 @@ cannot be processed, it stops the run with a message in the console, rather than
 integrate unmasked frames. Its log names the version of WBPP; a version other than the tested one
 is reported.
 
+**Fast integration.** Fast integration has no registration step, so the frames of a group integrated
+that way cannot be masked. WBPP's *Automatic integration mode*, on by default, switches every light
+group of 200 frames or more to fast integration: the builder then stops the run before anything is
+calibrated and names the groups. Uncheck the option, or set the integration mode of the group yourself
+in the post-calibration panel. Fast integration set by hand is accepted: a warning says that the
+frames of that group are not masked, and the other groups are.
+
 **One pipeline builder per WBPP run.** On a second run with the same frames, registration comes from
 WBPP's cache, while local normalization is computed again.
 
@@ -194,7 +201,14 @@ Whatever the level, look at the preview before erasing.
    score is √run × median(segment significance), so a few bright crossings (nebula chord, star)
    cannot carry a line alone. A short line through a saturated star is a diffraction spike and is
    rejected.
-5. Up to 5 lines are reported per frame. The frame score is the best line's score.
+5. Profile test: across the line, along its run, the median of the unclipped pixels is taken at
+   each distance up to 9 binned pixels. A trail is a thin ridge: its peak must stand clearly above
+   **each** side taken separately, which rejects the edges of nebulae, clouds and glows (a step is
+   above one side only), and its shoulders, 2 and 3 binned pixels away, must not stay close to the
+   peak, which rejects wide structures (filaments, bands of light). A second thin trail next to the
+   line (satellite train, aircraft lights) raises one shoulder only and is accepted. The idea comes
+   from the trail measurement of PixInsight's ImageAnalysis process.
+6. Up to 5 lines are reported per frame. The frame score is the best line's score.
 
 Validated on a synthetic full-frame set (clean sky, cloud, strong gradient, bright filaments,
 diffraction spikes, trails from very faint to saturated, a satellite train, an aircraft, a trail

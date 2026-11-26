@@ -6,7 +6,7 @@
    without confirmation.
 
 /*
- * StarlinkSweeper.js  v1.4.0
+ * StarlinkSweeper.js  v1.5.0
  * Copyright (c) 2026 Jacques Pouyaud.
  * SPDX-License-Identifier: GPL-3.0-or-later
  * Free software under the GNU General Public License, version 3 or (at your
@@ -15,6 +15,10 @@
  * under the direction of Jacques Pouyaud.
  * https://github.com/jps-34/StarlinkSweeper
  *
+ * v1.5.0: profile test of the detected lines (edges and wide structures are no
+ *   longer taken for trails); the pipeline builder stops the run when WBPP's
+ *   automatic integration mode switches a light group to fast integration, and
+ *   numbers the group folders in the order they run.
  * v1.4.0: masking in WBPP through a pipeline builder, on copies of the registered
  *   frames (StarlinkSweeper-PipelineBuilder.js), which checks the parts of WBPP it
  *   relies on; the event script is removed. PixInsight 1.9.6 or later required.
@@ -89,13 +93,17 @@
  *   4. continuity test: the line is cut into 24 segments, a trail must be
  *      present in at least 6 consecutive segments; the score is
  *      sqrt(run) * median(segment significance). A short line through a
- *      saturated star is a diffraction spike and is rejected.
+ *      saturated star is a diffraction spike and is rejected;
+ *   5. profile test: the cross profile of the line (medians of the unclipped
+ *      pixels) must peak above each side separately and be thin, which
+ *      rejects the edges and wide structures of nebulae and clouds
+ *      (profileTest() in the core).
  */
 
 CoreApplication.ensureMinimumVersion( 1, 9, 6 );
 
 var TITLE = "StarlinkSweeper";
-var VERSION = "1.4.0";
+var VERSION = "1.5.0";
 var SCRIPT_DIR = File.extractDrive(#__FILE__) + File.extractDirectory(#__FILE__);
 var PIPELINE_BUILDER = SCRIPT_DIR + "/StarlinkSweeper-PipelineBuilder.js";   // masking option, selected in WBPP
 

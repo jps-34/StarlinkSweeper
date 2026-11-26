@@ -46,6 +46,9 @@ var MARGIN       = 12;     // binned pixels ignored along the frame edges
 var STAR_SUM     = 4000;   // 3x3 block sum (binned sigma) above which a star is "saturated"
 var MAX_LINES    = 5;      // lines reported per frame
 var NODATA_GROW  = 2;      // bins left out around no-data bins (masking option)
+var PROFILE_TEST = true;   // cross-profile test of the candidate lines (see profileTest)
+var PROF_SIG     = 3.0;    // significance of the peak above each side
+var PROF_WIDE_SIG = 2.0;   // noise allowance of the shoulders (wide structures)
 
 // =============================================================== numeric core
 // (no PixInsight object below this line: this section is also run under node
@@ -255,7 +258,93 @@ function normalise(s, w, h, invalid) {
                if (blk[(sy + dy) * w + sx + dx] > b) { isMax = false; break; }
          if (isMax) stars.push([sx - w / 2.0, sy - h / 2.0]);
       }
-   return { z: z, valid: valid, stars: stars, preview: preview };
+   return { z: z, zu: zu, valid: valid, stars: stars, preview: preview };
+}
+
+function profileTest(zu, valid, w, h, thetaDeg, rho, u0, u1) {
+   // Cross profile of a candidate line along its run [u0, u1]: the median of
+   // the unclipped residuals (sigma units) at each signed distance -9..+9
+   // binned pixels from the line. Medians make it insensitive to the stars
+   // crossing the profile; unclipped values keep the shape of bright trails.
+   // A trail is a thin ridge: the peak (best of the offsets -1, 0, +1) must
+   // stand above EACH side (offsets 4..8 beyond it, pooled, taken separately),
+   // which rejects edges (a step is above one side only), and on each side the
+   // shoulders 2 and 3 binned pixels away must not both be closer to the peak
+   // than to the side, which rejects wide structures (nebular filaments, cloud
+   // bands) but keeps a trail with a thin neighbour (train, aircraft lights).
+   // Returns { reject: "" | "edge" | "wide", values: [peak, left, right,
+   // shoulder left 2, 3, shoulder right 2, 3, sigma] }.
+   var R = 9, nb = 2 * R + 1;
+   var t = thetaDeg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+   var cnt = new Int32Array(nb), x, y, o, d, u, k;
+   for (var pass = 0; pass < 2; ++pass) {
+      var buf = [];
+      if (pass == 1) for (k = 0; k < nb; ++k) { buf.push(new Float64Array(Math.max(cnt[k], 1))); cnt[k] = 0; }
+      for (y = 0; y < h; ++y) {
+         var yc = y - h / 2.0;
+         for (x = 0; x < w; ++x) {
+            o = y * w + x;
+            if (!valid[o]) continue;
+            var xc = x - w / 2.0;
+            d = xc * c + yc * s - rho;
+            if (d <= -R - 0.5 || d >= R + 0.5) continue;
+            u = -xc * s + yc * c;
+            if (u < u0 || u > u1) continue;
+            k = Math.round(d) + R;
+            if (pass == 1) buf[k][cnt[k]] = zu[o];
+            cnt[k]++;
+         }
+      }
+   }
+   var med = new Float64Array(nb);
+   for (k = 0; k < nb; ++k) med[k] = cnt[k] > 0 ? medianOf(buf[k], cnt[k]) : 0;
+   var ci = R;                                        // peak offset among -1, 0, +1
+   for (k = R - 1; k <= R + 1; ++k) if (med[k] > med[ci]) ci = k;
+   var pool = function (from, to) {                   // pooled samples of offsets [from, to]
+      var n = 0, q;
+      for (q = from; q <= to; ++q) n += cnt[q];
+      var a = new Float64Array(Math.max(n, 1)), m = 0;
+      for (q = from; q <= to; ++q) for (var i = 0; i < cnt[q]; ++i) a[m++] = buf[q][i];
+      return { a: a, n: n };
+   };
+   var L = pool(ci - 8, ci - 4), Rt = pool(ci + 4, ci + 8);
+   if (cnt[ci] < 10 || L.n < 10 || Rt.n < 10) return { reject: "", values: null };
+   var both = new Float64Array(L.n + Rt.n);
+   both.set(L.a.subarray(0, L.n)); both.set(Rt.a.subarray(0, Rt.n), L.n);
+   var sig = robustSigma(both, L.n + Rt.n).sig;
+   var se = function (n) { return 1.2533 * sig / Math.sqrt(Math.max(n, 1)); };   // error of a median
+   var peak = med[ci], left = medianOf(L.a, L.n), right = medianOf(Rt.a, Rt.n);
+   var sl2 = med[ci - 2], sl3 = med[ci - 3], sr2 = med[ci + 2], sr3 = med[ci + 3];
+   var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+   var values = [r3(peak), r3(left), r3(right), r3(sl2), r3(sl3), r3(sr2), r3(sr3), r3(sig)];
+   // the peak must stand significantly above each side (errors of the
+   // medians). No minimum height in units of the local dispersion: faint real
+   // trails (peak about 0.6 sigma of a binned pixel) would be lost.
+   var ePk = se(cnt[ci]);
+   var above = function (side, nside) {
+      return peak - side >= PROF_SIG * Math.sqrt(ePk * ePk + se(nside) * se(nside));
+   };
+   if (!above(left, L.n) || !above(right, Rt.n))
+      return { reject: "edge", values: values };
+   var wide = function (sh, nsh, side, nside) {
+      if (nsh < 10) return false;                     // too few samples (line along the margin)
+      var e = Math.sqrt(se(nsh) * se(nsh) + se(nside) * se(nside));
+      return sh - side > 0.5 * (peak - side) + PROF_WIDE_SIG * e;
+   };
+   // A side is wide when BOTH of its shoulders are raised, and the profile is
+   // wide when the mean of the four shoulders is raised: a second thin trail
+   // next to this one (Starlink train, aircraft lights) raises one shoulder
+   // only, by at most a quarter of the peak in the mean.
+   var mSh = (sl2 + sl3 + sr2 + sr3) / 4, mSide = (left + right) / 2;
+   var eSh = 0.5 * Math.sqrt(se(cnt[ci - 2]) * se(cnt[ci - 2]) + se(cnt[ci - 3]) * se(cnt[ci - 3]) +
+                             se(cnt[ci + 2]) * se(cnt[ci + 2]) + se(cnt[ci + 3]) * se(cnt[ci + 3]));
+   var eSide = 0.5 * Math.sqrt(se(L.n) * se(L.n) + se(Rt.n) * se(Rt.n));
+   if ((wide(sl2, cnt[ci - 2], left, L.n) && wide(sl3, cnt[ci - 3], left, L.n)) ||
+       (wide(sr2, cnt[ci + 2], right, Rt.n) && wide(sr3, cnt[ci + 3], right, Rt.n)) ||
+       (Math.min(cnt[ci - 3], cnt[ci - 2], cnt[ci + 2], cnt[ci + 3]) >= 10 &&
+        mSh - mSide > 0.5 * (peak - mSide) + PROF_WIDE_SIG * Math.sqrt(eSh * eSh + eSide * eSide)))
+      return { reject: "wide", values: values };
+   return { reject: "", values: values };
 }
 
 function Projector(z, valid, w, h) {
@@ -472,8 +561,12 @@ function analyseBinned(s8, w8, h8, invalid, maxLines, minLine) {
          var spike = (ct.run <= SPIKE_MAX_RUN || shortLine) && onBrightStar(theta, rho, ct.run, ct.start, norm.stars, seg.umin, seg.umax);
          var u0 = seg.umin + (seg.umax - seg.umin) * ct.start / N_SEG;
          var u1 = seg.umin + (seg.umax - seg.umin) * (ct.start + ct.run) / N_SEG;
-         lines.push({ score: spike ? 0 : ct.score, peak: best, angle: theta, rho: rho, run: ct.run,
-                      spike: spike, u0: u0, u1: u1 });
+         var prof = { reject: "", values: null };
+         if (PROFILE_TEST && !spike && ct.score >= FLOOR)
+            prof = profileTest(norm.zu, v8, w8, h8, theta, rho, u0, u1);
+         lines.push({ score: (spike || prof.reject) ? 0 : ct.score, raw: ct.score, peak: best, angle: theta,
+                      rho: rho, run: ct.run, spike: spike, reject: prof.reject, profile: prof.values,
+                      u0: u0, u1: u1 });
          for (var f3 = 0; f3 < nf; ++f3)
             for (var r2 = Math.max(0, ra - 2); r2 <= Math.min(hi - lo - 1, ra + 2); ++r2) sub[f3 * (hi - lo) + r2] = 0;
       }
@@ -491,8 +584,20 @@ function analyseBinned(s8, w8, h8, invalid, maxLines, minLine) {
       ln.x0 = ep.x0; ln.y0 = ep.y0; ln.x1 = ep.x1; ln.y1 = ep.y1;
       kept.push(ln);
    }
+   // lines dropped by the profile test that would otherwise have been kept
+   // (for the record only: the dialog and the masking ignore them)
+   var rejected = [];
+   for (var Q = 0; Q < lines.length && rejected.length < nKeep; ++Q) {
+      var lq = lines[Q];
+      if (!lq.reject || lq.raw < FLOOR) continue;
+      var dq = false;
+      for (var Z2 = 0; Z2 < rejected.length; ++Z2)
+         if (Math.abs(lq.rho - rejected[Z2].rho) < 4 && Math.abs(lq.angle - rejected[Z2].angle) < 0.5) { dq = true; break; }
+      if (!dq) rejected.push(lq);
+   }
+   rejected.sort(function (a, b) { return b.raw - a.raw; });
    var score = kept.length ? kept[0].score : (lines.length ? lines[0].score : 0);
-   return { score: score, coarse: coarseBest, lines: kept, nStars: norm.stars.length,
+   return { score: score, coarse: coarseBest, lines: kept, rejected: rejected, nStars: norm.stars.length,
             preview: norm.preview, pw: w8, ph: h8 };
 }
 
@@ -614,11 +719,13 @@ function coreSource() {
    var c = { FINE_BIN: FINE_BIN, COARSE_STEP: COARSE_STEP, FINE_STEP: FINE_STEP, FINE_HALF: FINE_HALF,
              N_SEG: N_SEG, MIN_RUN: MIN_RUN, SEG_MIN_SIG: SEG_MIN_SIG, SPIKE_MAX_RUN: SPIKE_MAX_RUN, MIN_LINE: MIN_LINE,
              MAX_CAND: MAX_CAND, FLOOR: FLOOR, MARGIN: MARGIN, STAR_SUM: STAR_SUM, MAX_LINES: MAX_LINES,
-             NODATA_GROW: NODATA_GROW, TYPE_KEYWORDS: TYPE_KEYWORDS };
+             NODATA_GROW: NODATA_GROW, PROFILE_TEST: PROFILE_TEST, PROF_SIG: PROF_SIG,
+             PROF_WIDE_SIG: PROF_WIDE_SIG,
+             TYPE_KEYWORDS: TYPE_KEYWORDS };
    var src = [ "var verboseLog = false, abortRequested = null;" ];
    for (var k in c) src.push("var " + k + " = " + JSON.stringify(c[k]) + ";");
    var functions = [ checkAbort, kthSmallest, medianOf, robustSigma, binMean, medianFilter, fillNoData,
-                     binMeanNoData, background, normalise, Projector, continuity, onBrightStar, endpoints,
+                     binMeanNoData, background, normalise, profileTest, Projector, continuity, onBrightStar, endpoints,
                      analyseBinned, frameType, frameTypeFromKeywords, stage, keywordsType, readBinnedImage,
                      analyseFile ];
    for (var i = 0; i < functions.length; ++i) src.push(functions[i].toString());
@@ -1607,7 +1714,7 @@ var StarlinkSweeperMaskEngine = ( function()
 {
    "use strict";
 
-   var VERSION = "1.4.0";
+   var VERSION = "1.5.0";
    var NO_SWAP_FILE = 0xFFFFFFFF;    // UndoFlag_NoSwapFile
    var MASK_HINTS = "compression-codec zlib+sh";
 
@@ -2213,9 +2320,17 @@ var StarlinkSweeperMaskEngine = ( function()
 // Besides the documented interface (buildPipelineForLight(), addOperationBlock()),
 // the builder relies on parts of WBPP that may change: the operations array of
 // engine.operationQueue, the BPPOperationBlock class, processingSucceeded() and
-// addDrizzleFile() of the frames, and the range rejection of the zeros by WBPP's
-// integration of light frames. They are checked first. When one is missing, the
-// run stops with a clear message instead of integrating unmasked frames.
+// addDrizzleFile() of the frames, the range rejection of the zeros by WBPP's
+// integration of light frames, and the post-calibration groups with their
+// integration mode (groupsManager.groupsForMode(), isActive, fastIntegrationData).
+// They are checked first. When one is missing, the run stops with a clear message
+// instead of integrating unmasked frames.
+//
+// Fast integration has no registration step, hence no masking step. A light group
+// switched to fast integration by WBPP's automatic integration mode stops the run:
+// the user may not have noticed it. A group set to fast integration by the user
+// (on the group, or WBPP's fast mode) is accepted with a warning: its frames are
+// not masked, the other groups are.
 
 ( function()
 {
@@ -2223,8 +2338,9 @@ var StarlinkSweeperMaskEngine = ( function()
    var root = engine.outputDirectory + "/StarlinkSweeper";
    var copyRoot = root + "/copies";
    var written = [];
-   var count = 0;
    var logged = "";
+   var INCOMPATIBLE = "the masking cannot run with this version of WBPP";
+   var UPDATE = "run WBPP without the pipeline builder, or update StarlinkSweeper.";
 
    function log( text )
    {
@@ -2233,16 +2349,112 @@ var StarlinkSweeperMaskEngine = ( function()
       logged += text + "\n";
    }
 
-   function stopRun( requestInterruption, problems )
+   function warn( text )
    {
-      console.criticalln( "<end><cbr>*** StarlinkSweeper: the masking cannot run with this version of WBPP, "
-                          + "the run is stopped so that no frame is integrated unmasked:" );
+      console.warningln( "** StarlinkSweeper: " + text );
+      console.flush();
+      logged += "WARNING: " + text + "\n";
+   }
+
+   // Removes the masked copies and writes the log. Runs as the last step of the
+   // pipeline, and when the run is stopped, since an interruption cancels that step.
+   function finish( reportCount )
+   {
+      var removed = 0;
+      for ( var i = 0; i < written.length; ++i )
+         try
+         {
+            File.remove( written[i] );
+            ++removed;
+         }
+         catch ( e )
+         {
+            log( "** unable to remove " + written[i] + ": " + e.message );
+         }
+      written = [];
+      if ( reportCount || removed > 0 )
+         log( removed + " masked copies removed" );
+      try
+      {
+         if ( !File.directoryExists( root ) )
+            File.createDirectory( root, true );
+         File.writeTextFile( root + "/StarlinkSweeper.log", logged );
+      }
+      catch ( e )
+      {
+         console.warningln( "StarlinkSweeper: unable to write the log: " + e.message );
+      }
+   }
+
+   function stopRun( requestInterruption, problems, reason, advice )
+   {
+      reason = reason || INCOMPATIBLE;
+      advice = advice || UPDATE;
+      console.criticalln( "<end><cbr>*** StarlinkSweeper: " + reason
+                          + ", the run is stopped so that no frame is integrated unmasked:" );
       for ( var i = 0; i < problems.length; ++i )
          console.criticalln( "*** StarlinkSweeper: " + problems[i] );
-      console.criticalln( "*** StarlinkSweeper: run WBPP without the pipeline builder, or update StarlinkSweeper." );
-      logged += "STOPPED:\n" + problems.join( "\n" ) + "\n";
+      console.criticalln( "*** StarlinkSweeper: " + advice );
+      logged += "STOPPED: " + reason + ":\n" + problems.join( "\n" ) + "\n" + advice + "\n";
       if ( typeof requestInterruption == "function" )
          requestInterruption();
+      finish();
+   }
+
+   // Queues an operation block in front of the queue, before WBPP's calibration of
+   // the bias, dark and flat frames, which is queued before the builder runs. When
+   // the operations array is not as expected, the block stays at the end.
+   function queueFirst( block )
+   {
+      engine.operationQueue.addOperationBlock( block );
+      var ops = engine.operationQueue.operations;
+      if ( !Array.isArray( ops ) || ops.length < 2 )
+         return;
+      ops.unshift( ops.pop() );
+      for ( var k = 0; k < ops.length; ++k )
+         ops[k].operation.__index__ = k;
+   }
+
+   function describe( group )
+   {
+      try { return group.toString(); } catch ( e ) { return "filter " + group.filter; }
+   }
+
+   // Active post-calibration light groups integrated with fast integration, by origin
+   // of the choice: WBPP's automatic integration mode, or the user.
+   function fastIntegrationGroups()
+   {
+      var result = { automatic: [], chosen: [], problems: [] };
+      var manager = engine.groupsManager;
+      if ( !manager || typeof manager.groupsForMode != "function" || !BPP.GroupingMode
+           || BPP.GroupingMode.POST === undefined )
+      {
+         result.problems.push( "the post-calibration groups cannot be read (groupsManager.groupsForMode(), BPP.GroupingMode.POST)" );
+         return result;
+      }
+      var groups = manager.groupsForMode( BPP.GroupingMode.POST );
+      if ( !Array.isArray( groups ) )
+      {
+         result.problems.push( "the post-calibration groups cannot be read (groupsForMode() returned no list)" );
+         return result;
+      }
+      for ( var i = 0; i < groups.length; ++i )
+      {
+         var g = groups[i];
+         if ( g.imageType != ImageType.Light )
+            continue;
+         var fi = g.fastIntegrationData;
+         if ( typeof g.isActive != "boolean" || !fi || typeof fi.enabled != "boolean"
+              || typeof fi.automatic != "boolean" || typeof fi.manuallyChanged != "boolean" )
+         {
+            result.problems.push( "the integration mode of the light groups cannot be read "
+                                  + "(isActive, fastIntegrationData: enabled, automatic, manuallyChanged)" );
+            return result;
+         }
+         if ( g.isActive && fi.enabled )
+            ( fi.automatic ? result.automatic : result.chosen ).push( describe( g ) );
+      }
+      return result;
    }
 
    function sourceOf( f )
@@ -2285,13 +2497,32 @@ var StarlinkSweeperMaskEngine = ( function()
       return [];
    }
 
+   // Nothing is queued for the light frames when the run must stop: a single step,
+   // in front of the queue, stops it before anything is calibrated. Messages are
+   // written when the run starts, not here: WBPP runs the builder again at almost
+   // every change in its window.
    var problems = checkWBPP();
+   var fast = problems.length > 0 ? null : fastIntegrationGroups();
+   if ( fast )
+      problems = fast.problems;
    if ( problems.length > 0 )
    {
-      // Nothing is queued for the light frames: this single step stops the run.
-      engine.operationQueue.addOperationBlock( function( env, requestInterruption )
+      queueFirst( function( env, requestInterruption )
       {
          stopRun( requestInterruption, problems );
+      } );
+      return;
+   }
+   if ( fast.automatic.length > 0 )
+   {
+      queueFirst( function( env, requestInterruption )
+      {
+         stopRun( requestInterruption, fast.automatic,
+                  "WBPP's automatic integration mode switched these light groups to fast integration, "
+                  + "which has no registration step: they would not be masked",
+                  "uncheck Automatic integration mode, or set the integration mode of these groups yourself "
+                  + "in the post-calibration panel (fast integration set by hand is accepted, its frames are "
+                  + "not masked)." );
       } );
       return;
    }
@@ -2304,8 +2535,9 @@ var StarlinkSweeperMaskEngine = ( function()
       {
          super( "StarlinkSweeper masking", registration.group, true /* trackable */ );
          var group = registration.group;
-         var folder = "group" + ( ++count < 10 ? "0" : "" ) + count;
          var self = this;
+         // Named once all the steps are queued, in the order they run (see below).
+         this.folder = "";
 
          this.envForScript = () => ( { name: "StarlinkSweeper masking", status: this.status, statusMessage: this.statusMessage, group: group } );
 
@@ -2332,6 +2564,7 @@ var StarlinkSweeperMaskEngine = ( function()
             if ( paths.length == 0 )
                return OperationBlockStatus.DONE;
             var version = BPP.Version && BPP.Version.WBPP_VERSION;
+            var folder = self.folder;
             log( "StarlinkSweeper " + StarlinkSweeperMaskEngine.VERSION + ", WBPP " + version + ", " + folder + ": "
                  + paths.length + " registered frames" );
             if ( TESTED_WBPP.indexOf( version ) < 0 )
@@ -2395,8 +2628,19 @@ var StarlinkSweeperMaskEngine = ( function()
          ++inserted;
       }
    }
+   // The steps were inserted from the end of the queue: their folders are named
+   // here, in the order they run (group01 is the first group masked).
+   var count = 0;
    for ( var k = 0; k < queue.operations.length; ++k )
-      queue.operations[k].operation.__index__ = k;
+   {
+      var queued = queue.operations[k].operation;
+      queued.__index__ = k;
+      if ( queued instanceof MaskingOperation )
+      {
+         ++count;
+         queued.folder = "group" + ( count < 10 ? "0" : "" ) + count;
+      }
+   }
 
    if ( inserted == 0 )
    {
@@ -2404,29 +2648,15 @@ var StarlinkSweeperMaskEngine = ( function()
       return;
    }
 
+   if ( fast.chosen.length > 0 )
+      queueFirst( function()
+      {
+         for ( var i = 0; i < fast.chosen.length; ++i )
+            warn( "fast integration was set by hand for this group, its frames are not masked: " + fast.chosen[i] );
+      } );
+
    queue.addOperationBlock( function()
    {
-      var removed = 0;
-      for ( var i = 0; i < written.length; ++i )
-         try
-         {
-            File.remove( written[i] );
-            ++removed;
-         }
-         catch ( e )
-         {
-            log( "** unable to remove " + written[i] + ": " + e.message );
-         }
-      log( removed + " masked copies removed" );
-      try
-      {
-         if ( !File.directoryExists( root ) )
-            File.createDirectory( root, true );
-         File.writeTextFile( root + "/StarlinkSweeper.log", logged );
-      }
-      catch ( e )
-      {
-         console.warningln( "StarlinkSweeper: unable to write the log: " + e.message );
-      }
+      finish( true /* reportCount */ );
    } );
 } )();

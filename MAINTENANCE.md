@@ -14,6 +14,7 @@ packaged, installed or run by the script.
 | `tests/make_synthetic_subs.py` | generates the synthetic validation frames (a few GB, a few minutes) |
 | `tests/run_scan_pi.js` | runs the analysis of the script on a list of frames inside PixInsight, without the dialog: one JSON line per frame |
 | `tests/compare_scans.py` | compares two runs of `run_scan_pi.js`, field by field |
+| `tests/summarize_scans.py` | summarises two runs of `run_scan_pi.js` (older and newer detection) frame by frame: lines kept, lines dropped by the profile test, frames that change between listed and clean |
 | `scripts/StarlinkSweeper-PipelineBuilder.js` | WBPP pipeline builder of the masking option (no menu entry). **Generated, do not edit**: `tools/build_pipeline_builder.py` |
 | `scripts/StarlinkSweeperBuilderBody.js` | source of the builder: builds the pipeline, inserts the masking step, hands the copies to WBPP. Not packaged |
 | `scripts/StarlinkSweeperMaskEngine.js` | source of the builder, masking engine: detection per registered frame, masks, masked copies, coverage, threads. Not packaged |
@@ -114,7 +115,16 @@ renumbers `__index__`), and appends a cleanup block. WBPP's frames move on throu
 hence the copy of the `.xdrz` next to the masked copy and `addDrizzleFile()`. Only
 `buildPipelineForLight()` and `operationQueue` are shown in WBPP's example: check the rest at each
 WBPP version. The builder checks them itself before queuing anything (`checkWBPP()`), and the
-frames before handing them the copies (`checkFrames()`); a missing part stops the run. Add a tested
+frames before handing them the copies (`checkFrames()`); a missing part stops the run. Fast integration
+groups get no `Registration` operation, hence no masking step: `fastIntegrationGroups()` reads the
+POST groups (`groupsManager.groupsForMode()`, `isActive`, `fastIntegrationData.enabled`, `automatic`,
+`manuallyChanged`); a group switched by the automatic integration mode stops the run, a group set by
+hand (or WBPP's fast mode) only gets a warning. WBPP applies the automatic mode when it rebuilds the
+groups, before it calls the builder (`StackEngine.rebuild()`). A stop is moved to the front of the
+queue (`queueFirst()`), before the calibration of bias, dark and flat frames that WBPP queues before
+the builder; an interruption cancels the last step, so `stopRun()` removes the copies and writes the
+log itself. Messages are written when the run starts, never while building: WBPP runs the builder
+again at almost every change in its window. Add a tested
 version to `TESTED_WBPP` after a full validation with it. Do not untick *Image Integration* to run an integration of your own: WBPP would also
 drop the weights, drizzle and autocrop.
 

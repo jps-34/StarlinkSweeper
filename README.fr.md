@@ -181,6 +181,14 @@ chose n'est pas comme prévu, ou si une brute ne peut pas être traitée, il arr
 message dans la console, plutôt que de laisser WBPP intégrer des brutes non masquées. Son journal
 indique la version de WBPP ; une version autre que celle testée est signalée.
 
+**Fast integration.** La fast integration n'a pas d'étape d'enregistrement : les brutes d'un groupe
+intégré ainsi ne peuvent pas être masquées. Le mode *Automatic integration mode* de WBPP, actif par
+défaut, passe en fast integration tout groupe de lumières de 200 brutes ou plus : le builder arrête
+alors le passage avant toute calibration et nomme les groupes. Décoche l'option, ou règle toi-même le
+mode d'intégration du groupe dans le panneau de post-calibration. La fast integration réglée à la main
+est acceptée : un avertissement indique que les brutes de ce groupe ne sont pas masquées, les autres
+groupes le sont.
+
 **Un seul pipeline builder par passage de WBPP.** À un deuxième passage avec les mêmes brutes,
 l'enregistrement vient du cache de WBPP, mais la normalisation locale est recalculée.
 
@@ -219,7 +227,15 @@ Quel que soit le niveau, regarder l'aperçu avant d'effacer.
    quelques croisements brillants (corde de nébuleuse, étoile) ne peuvent pas porter une ligne à
    eux seuls. Une ligne courte passant par une étoile saturée est une aigrette de diffraction et
    est rejetée.
-5. Jusqu'à 5 lignes sont rapportées par brute. Le score de la brute est celui de sa meilleure
+5. Test de profil : en travers de la ligne, le long de sa partie retenue, on prend la médiane des
+   pixels non écrêtés à chaque distance jusqu'à 9 pixels binnés. Une traînée est une crête fine :
+   son pic doit dépasser nettement **chaque** côté pris séparément, ce qui écarte les bords de
+   nébuleuses, de nuages et de halos (une marche ne dépasse qu'un côté), et ses épaules, à 2 et 3
+   pixels binnés, ne doivent pas rester proches du pic, ce qui écarte les structures larges
+   (filaments, bandes de lumière). Une deuxième traînée fine à côté de la ligne (train de
+   satellites, feux d'avion) ne relève qu'une épaule et reste acceptée. L'idée vient de la mesure
+   des traînées du process ImageAnalysis de PixInsight.
+6. Jusqu'à 5 lignes sont rapportées par brute. Le score de la brute est celui de sa meilleure
    ligne.
 
 Validé sur un jeu synthétique plein format (ciel propre, nuage, fort gradient, filaments

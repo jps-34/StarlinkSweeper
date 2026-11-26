@@ -16,14 +16,19 @@ var STARLINKSWEEPER_NO_MAIN = true;
 
 function record(r) {
    if (r.error) return { file: File.extractName(r.file), error: r.error };
-   var lines = [];
-   for (var i = 0; r.lines && i < r.lines.length; ++i) {
-      var L = r.lines[i], o = {};
-      for (var k in L) o[k] = L[k];
-      lines.push(o);
-   }
-   return { file: File.extractName(r.file), status: r.status, score: r.score, coarse: r.coarse,
-            width: r.width, height: r.height, skipped: r.skipped || "", lines: lines, seconds: r.seconds };
+   var copy = function (list) {
+      var out = [];
+      for (var i = 0; list && i < list.length; ++i) {
+         var L = list[i], o = {};
+         for (var k in L) o[k] = L[k];
+         out.push(o);
+      }
+      return out;
+   };
+   var rec = { file: File.extractName(r.file), status: r.status, score: r.score, coarse: r.coarse,
+               width: r.width, height: r.height, skipped: r.skipped || "", lines: copy(r.lines), seconds: r.seconds };
+   if (r.rejected) rec.rejected = copy(r.rejected);   // lines dropped by the profile test
+   return rec;
 }
 
 // Runtime.jsArguments since PixInsight 1.9.5 (jsArguments is deprecated there)
